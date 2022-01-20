@@ -1,0 +1,357 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsthm,amsfonts}
+\usepackage{mathtools}
+
+\newcommand{\G}{\mathbb{G}}
+\newcommand{\F}{\mathbb{F}}
+\newcommand{\func}[1]{\mathsf{#1}}
+\newcommand{\comm}{\func{Comm}}
+\newcommand{\hash}{\mathcal{H}}
+
+\title{Spats: user-defined confidential assets for the Spark transaction protocol}
+\author{Aaron Feickert \\ Aram Jivanyan}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+This technical note describes Spats, a method for supporting user-defined confidential assets as an extension to the Spark transaction protocol.
+It does so by extending coin value commitments to bind and mask an asset type, and asserting in zero knowledge that all coins consumed or generated in a transaction share a common type.
+Other cryptographic components in the Spark protocol are modified as necessary to support the extended commitment structure.
+
+The research described in this note has not been formally reviewed, may contain errors, and should not be considered suitable for production.
+
+
+\section{Introduction}
+
+We wish to construct user-defined assets as an extension to the Spark protocol.
+To do so, we add an \textit{asset type} to each coin generated as part of a mint or spend operation.
+Transaction validity is extended to require that all consumed and generated coins in a spend transaction share the same type, but in a way that does not reveal it.
+This ensures that the entire pool of Spark coins is available as a cover set for spend transactions, regardless of the type of the coins actually consumed.
+
+
+\section{Primitives}
+
+We describe cryptographic constructions required for the Spats protocol.
+
+
+\subsection{Parallel one-of-many proving system}
+
+The parallel one-of-many proving system definition is modified to support extended commitments.
+The public parameters are $pp_{\text{par}} = (\G, \F, n, m, pp_{\text{comm}})$, where $pp_{\text{com}}$ are the public parameters for an extended commitment construction.
+The algorithm tuple $(\func{ParallelProve}, \func{ParallelVerify})$ is modified to support the following relation:
+\begin{multline*}
+\left\{ pp_{\text{par}}, \{S_k,V_k\}_{k=0}^{N-1} \subset \G^2, S',V' \in \G ; l \in \mathbb{N}, (s,v) \in \F : \right. \\
+\left. 0 \leq l < N, S_l - S' = \comm(0,0,s), V_l - V' = \comm(0,0,v) \right\}
+\end{multline*}
+
+The existing parallel one-of-many proving system in the Spark protocol is trivially modified to support this definition, since it also reduces to an assertion of commitments to zero.
+
+
+\subsection{Range proving system}
+
+The range proving construction is modified to support extended commitments.
+The public parameters are $pp_{\text{rp}} = (\G, \F, v_{\text{max}}, pp_{\text{comm}})$, where $pp_{\text{comm}}$ are the public parameters for an extended commitment construction.
+The algorithm tuple $(\func{RangeProve}, \func{RangeVerify})$ is modified to support the following relation:
+$$\{ pp_{\text{rp}}, C \in \G ; (a, v, r) \in \F : 0 \leq v < v_{\text{max}}, C = \comm(a, v, r) \}$$
+
+We describe here a modification to the Bulletproofs+ range proving system to support this construction; extending this further to support aggregation of multiple commitments in a single proof is straightforward.
+We defer a full security analysis of these changes to future work.
+Note that we use additive notation to describe these changes, in order to match this convention in the Spark protocol.
+
+The prover selects a value $\underline{\alpha} \in \F$ uniformly at random.
+It constructs $$A = \vec{a}_L \vec{G} + \vec{a}_R \vec{H} + \comm(\underline{\alpha}, 0, \alpha)$$ and defines $\widehat{\underline{\alpha}} = \underline{\alpha} + ay^{n+1}$ as an additional witness to the weighted inner-product argument protocol we describe now.
+
+The zero-knowledge weighted inner-product protocol is modified to support the following relation:
+\begin{multline*}
+\{ pp_{\text{erp}}, \vec{G}, \vec{H} \in \G^n, P \in \G; (\vec{a}, \vec{b}) \in \F^n, (\alpha, \underline{\alpha}) \in \F : \\
+P = \vec{a}\vec{G} + \vec{b}\vec{H} + \comm(\underline{\alpha}, \vec{a} \odot_y \vec{b}, \alpha) \}
+\end{multline*}
+
+In the case $n > 1$, the prover selects $\underline{d}_L, \underline{d}_R \in \F$ uniformly at random.
+It computes
+\begin{align*}
+    L &= (y^{-\widehat{n}}\vec{a}_1)\vec{G}_2 + \vec{b}_2 \vec{H}_1 + \comm(\underline{d}_L, c_L, d_L) \\
+    R &= (y^{\widehat{n}}\vec{a}_2)\vec{G}_1 + \vec{b}_1 \vec{H}_2 + \comm(\underline{d}_R, c_R, d_R)
+\end{align*}
+and $\widehat{\underline{\alpha}} = \underline{d}_L e^2 + \underline{\alpha} + \underline{d}_R e^{-2}$.
+
+In the case $n = 1$, the prover selects $\underline{\delta}, \underline{\eta} \in \F$ uniformly at random.
+It computes
+\begin{align*}
+    A &= r\vec{G} + s\vec{H} + \comm(\underline{\delta}, r \odot_y \vec{b} + s \odot_y \vec{a}, \delta) \\
+    B &= \comm(\underline{\eta}, r \odot_y s, \eta)
+\end{align*}
+and $\underline{\delta}' = \underline{\eta} + \underline{\delta} e + \underline{\alpha} e^2$.
+It sends $\underline{\delta}'$ to the verifier.
+
+The verifier accepts if and only if the following holds:
+$$e^2 P + eA + B = (r'e)\vec{G} + (s'e)\vec{H} + \comm(\underline{\delta}', r' \odot_y s', \delta')$$
+
+Observe that this construction adds only $\underline{\delta}'$ to the overall proof structure.
+
+
+\subsection{Asset type equality proof}
+
+We introduce a new proving system to prove in zero knowledge that a set of extended commitments share a common single discrete logarithm in one component.
+Let $$pp_{\text{type}} = (\G, \F, pp_{\text{comm}})$$ be the public parameters of such a proving system, where $\G$ is a prime-order group where the discrete logarithm problem is hard, $\F$ is its scalar field, and $pp_{\text{comm}}$ are the public parameters for an extended commitment construction.
+
+The proving system is a tuple of algorithms $(\func{TypeProve}, \func{TypeVerify})$ for the following relation:
+$$\{ pp_{\text{type}}, \{C_i\}_{i=0}^{n-1} ; (x, \{y_i, z_i\}_{i=0}^{n-1}) \in \F : \forall i \in [0,n), C_i = \comm(x, y_i, z_i) \}$$
+
+The protocol proceeds as follows:
+\begin{enumerate}
+    \item The prover selects $r_x, r_y, r_z, s_y, s_z \in \F$ uniformly at random.
+    \item The prover computes $A = \comm(r_x, r_y, r_z)$ and $B = \comm(0, s_y, s_z)$, and sends these values to the verifier.
+    \item The verifier selects $c \in \F$ uniformly at random, and sends this challenge value to the prover.
+    \item The prover computes the values
+    \begin{align*}
+        t_x &= r_x + cx \\
+        t_y &= r_y + cy_0 \\
+        t_z &= r_z + cz_0 \\
+        u_y &= s_y + \sum_{i=1}^{n-1} c^i(y_i - y_0) \\
+        u_z &= s_z + \sum_{i=1}^{n-1} c^i(z_i - z_0)
+    \end{align*}
+    and sends them to the verifier.
+    \item The verifier accepts the proof if and only if the following hold:
+    \begin{align}
+        \comm(t_x, t_y, t_z) &= A + cC_0 \label{eqn:type-1} \\
+        \comm(0, u_y, u_z) &= B + \sum_{i=1}^{n-1} c^i(C_i - C_0) \label{eqn:type-2}
+    \end{align}
+\end{enumerate}
+
+We now prove that this construction is a sigma protocol for the given relation.
+
+\begin{proof}
+To show the construction is a sigma protocol, we must show that it is complete, special sound, and honest-verifier zero knowledge.
+
+Completeness follows trivially by inspection.
+
+We now show that the protocol is $n$-special sound by constructing an extractor that produces a witness set on $n$ accepting transcripts with distinct challenges.
+Consider $n$ distinct challenges $\{c_j\}_{j=0}^{n-1}$ corresponding to response transcripts $\{(t_x^j, t_y^j, t_z^j, u_y^j, u_z^j)\}_{j=0}^{n-1}$, respectively, where we use superscript indexing.
+By applying Equation \ref{eqn:type-1} to the $j = 0$ and $j = 1$ transcripts and subtracting them, we obtain the following:
+$$\comm(t_x^1 - t_x^0, t_y^1 - t_y^0, t_z^1 - t_z^0) = (c_1 - c_0)C_0$$
+Since $c_1 \neq c_0$ by assumption, we have the following extracted witnesses:
+\begin{align*}
+    x &= \frac{t_x^1 - t_x^0}{c_1 - c_0} \\
+    y_0 &= \frac{t_y^1 - t_y^0}{c_1 - c_0} \\
+    z_0 &= \frac{t_z^1 - t_z^0}{c_1 - c_0}
+\end{align*}
+
+To extract the remaining witness elements, apply Equation \ref{eqn:type-2} to obtain the following system of equations:
+\begin{gather}
+\begin{aligned}
+    \label{eqn:sound}
+    B + \sum_{i=1}^{n-1} c_0^i(C_i - C_0) &= \comm(0, u_y^0, u_z^0) \\
+    B + \sum_{i=1}^{n-1} c_1^i(C_i - C_0) &= \comm(0, u_y^1, u_z^1) \\
+    &\vdotswithin{=} \\
+    B + \sum_{i=1}^{n-1} c_{n-1}^i(C_i - C_0) &= \comm(0, u_y^{n-1}, u_z^{n-1})
+\end{aligned}
+\end{gather}
+Subtract each equation from the first:
+\begin{align*}
+    \sum_{i=1}^{n-1} (c_1^i - c_0^i)(C_i - C_0) &= \comm(0, u_y^1 - u_y^0, u_z^1 - u_z^0) \\
+    \sum_{i=1}^{n-1} (c_2^i - c_0^i)(C_i - C_0) &= \comm(0, u_y^2 - u_y^0, u_z^2 - u_z^0) \\
+    &\vdotswithin{=} \\
+    \sum_{i=1}^{n-1} (c_{n-1}^i - c_0^i)(C_i - C_0) &= \comm(0, u_y^{n-1} - u_y^0, u_z^{n-1} - u_z^0)
+\end{align*}
+Then we define a set $\{y_i\}_{i=1}^{n-1}$ via the following linear system:
+\begin{align*}
+    \sum_{i=1}^{n-1} (c_1^i - c_0^i)(y_i - y_0) &= u_y^1 - u_y^0 \\
+    \sum_{i=1}^{n-1} (c_2^i - c_0^i)(y_i - y_0) &= u_y^2 - u_y^0 \\
+    &\vdotswithin{=} \\
+    \sum_{i=1}^{n-1} (c_{n-1}^i - c_0^i)(y_i - y_0) &= u_y^{n-1} - u_y^0
+\end{align*}
+Since the challenges are uniformly distributed, the system has a unique solution in $\{y_i\}_{i=1}^{n-1}$ with high probability.
+We can form a similar linear system to obtain unique $\{z_i\}_{i=1}^{n-1}$.
+
+This implies that the terms $C_i - C_0 = \comm(0, y_i - y_0, z_i - z_0)$ satisfy the original linear system in Equation \ref{eqn:sound} for all $i \in [1,n)$.
+From our earlier extraction we have $C_0 = \comm(x, y_i, z_i)$, so for $i \in [1,n)$ we have $C_i = \comm(x, y_i, z_i)$ as required.
+
+It remains to show that these solutions are unique; that is, that no $C_i$ has a different representation with coefficients $x',y_i',z_i'$ consistent with successful verification.
+If this were the case, then we must have the polynomial equation $\sum_{i=0}^{n-1} c^i(y_i - y_i') = 0$ in $c$; however, since $c$ is selected randomly by the verifier, all coefficients of the polynomial must (with overwhelming probability) be zero by the Schwartz-Zippel lemma.
+Hence each $y_i = y_i'$ (and by the same reasoning, $z_i = z_i'$ and $x = x'$), and the extracted witness set is unique.
+
+It remains to prove that the protocol is honest-verifier zero knowledge.
+To show this, we construct a simulator that produces transcripts distributed identically to those of valid proofs.
+Given a valid statement and random challenge $c \in \F$, the simulator chooses $t_x, t_y, t_z \in \F$ uniformly at random, and sets $A = \comm(t_x, t_y, t_z) - cC_0$ using these values.
+It selects $u_y, u_z \in \F$ uniformly at random, and sets
+$$B = \comm(0, u_y, u_z) - \sum_{i=1}^{n-1} c^i(C_i - C_0)$$
+using these values.
+By construction, this transcript passes the verification Equations \ref{eqn:type-1} and \ref{eqn:type-2}.
+Since the extended commitment generators are independent, all proof elements in both the simulation and real proofs are identically uniformly distributed.
+
+This completes the proof.
+\end{proof}
+
+
+\subsection{Balance proof}
+
+We require a representation proof for use in balance assertion.
+It proves that a extended commitment is bound to a zero value.
+Let $$pp_{\text{bal}} = (\G, \F, pp_{\text{comm}})$$ be the public parameters of such a proving system, where $\G$ is a prime-order group where the discrete logarithm problem is hard, $\F$ is its scalar field, and $pp_{\text{comm}}$ are the public parameters for an extended commitment construction.
+
+The proving system is a tuple of algorithms $(\func{BalanceProve}, \func{BalanceVerify})$ for the following relation:
+$$\{ pp_{\text{bal}}, C \in \G ; (x, z) \in \F : C = \comm(x, 0, z) \}$$
+
+The protocol proceeds as follows:
+\begin{enumerate}
+    \item The prover selects $r_x, r_z \in \F$ uniformly at random.
+    \item The prover computes $A = \comm(r_x, 0, r_z)$ and sends this value to the verifier.
+    \item The verifier selects $c \in \F$ uniformly at random, and sends this challenge value to the prover.
+    \item The prover computes the values
+    \begin{align*}
+        t_x &= r_x + cx \\
+        t_z &= r_z + cz
+    \end{align*}
+    and sends them to the verifier.
+    \item The verifier accepts the proof if and only if $\comm(t_x, 0, t_z) = A + cC$ holds.
+\end{enumerate}
+This construction is a sigma protocol for the given relation; the proof is standard, and we omit it here.
+
+
+\section{Protocol}
+
+We now describe the changes to the Spark protocol required for Spats.
+
+
+\subsection{Asset types}
+
+An asset type is a value $a \in \F$.
+By convention, we let $a = 0$ represent a default type; this permits (as discussed below) the use of certain Spats-compatible primitives in the original Spark protocol if desired for forward compatibility.
+
+Asset types need not be selected randomly, but may be.
+
+
+\subsection{Coins}
+
+The value commitment in coins is modified to use an extended commitment.
+For a coin with asset type $a$, value $v$, and nonce $k$, the value commitment is $C = \comm(a, v, \hash_{\text{val}}(k))$.
+
+The range proof for the coin value commitment uses our modified proving system to support the extended commitment:
+$$\Pi_{\text{rp}} = \func{RangeProve}(pp_{\text{rp}}, C ; (a, v, \hash_{\text{val}}(k)))$$
+
+The recipient data is updated to include the asset type if necessary.
+That is, if $b = 0$ we have $r = (a, v, d, k, m)$.
+
+If $b = 0$, the coin is the tuple $\func{Coin} = (S, K, C, \Pi_{\text{rp}}, \overline{r})$.
+If $b = 1$, the coin is the tuple $\func{Coin} = (S, K, C, a, v, \overline{r})$.
+
+
+\subsection{Mints}
+
+The value representation proof is updated to include the asset type:
+$$\Pi_{\text{bal}} = \func{RepProve}(pp_{\text{rep}}, \comm(0,0,1), C - \comm(a, v, 0) ; (\hash_{\text{val}}(k)))$$
+
+
+\subsection{Identification and recovery}
+
+Coin identification is modified to test the value commitment against the asset type.
+If the coin was generated in a spend transaction, the recipient data is decrypted to obtain $r = (a, v, d, k, m)$.
+The value commitment is checked to ensure that $C = \comm(a, v, \hash_{\text{val}}(k))$.
+
+Coin recovery is unchanged.
+
+
+\subsection{Spends}
+
+Spend transactions are updated to account for extended commitments and assert balance properly.
+Each value commitment offset is extended:
+$$C_u' = \comm(a, v_u, \hash_{\text{val}'}(s_u, D))$$
+The balance proof uses our new construction:
+\begin{multline*}
+    \Pi_{\text{bal}} = \func{BalanceProve}\left( pp_{\text{bal}}, \sum_{u=0}^{w-1} C_u' - \sum_{j=0}^{t-1} \overline{C}_j - \comm(0,f,0); \right. \\
+    \left. \left( (w + t)a, \sum_{u=0}^{w-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=0}^{t-1} \hash_{\text{val}}(k_j) \right) \right)
+\end{multline*}
+A proof of asset type equality is added to the transaction:
+\begin{multline*}
+    \Pi_{\text{type}} = \func{TypeProve}\left( pp_{\text{type}}, \{C_u'\}_{u=0}^{w-1} \cup \{\overline{C}_j\}_{j=0}^{t-1} ; \right. \\
+    \left. \left( a, \{ v_u, \hash_{\text{val}'}(s_u,D) \}_{u=0}^{w-1} \cup \{ \overline{v}_j, \hash_{\text{val}}(k_j) \}_{j=0}^{t-1} \right) \right)
+\end{multline*}
+The binding hash $\mu$ is updated to include $\Pi_{\text{type}}$ in its input.
+
+
+\subsection{Verification}
+
+Verification is updated to account for the changes to mint and spend transactions.
+
+When verifying a mint transaction, the asset type $a$ is also parsed from the coin, after which the value representation verification is performed:
+$$\func{RepVerify}(pp_{\text{rep}}, \Pi_{\text{bal}}, \comm(0,0,1), C - \comm(a,v,0))$$
+
+When verifying a spend transaction, the verifications
+$$\func{TypeVerify}(pp_{\text{type}}, \Pi_{\text{type}}, \{C_u'\}_{u=0}^{w-1} \cup \{\overline{C}_j\}_{j=0}^{t-1})$$
+and
+$$\func{BalanceVerify}\left( pp_{\text{bal}}, \Pi_{\text{bal}}, \sum_{u=0}^{w-1} C_u' - \sum_{j=0}^{t-1} \overline{C}_j - \comm(0,f,0) \right)$$
+are performed.
+
+
+\section{Efficiency}
+
+We briefly outline the efficiency of Spats compared to the original Spark protocol.
+Table \ref{table:size_mint} shows the change in size of mint transaction components, and Table \ref{table:size_spend} shows the change in size of spend transaction components.
+We assume throughout that both group and scalar elements have $32$-byte representations, and that asset type identifiers are restricted to $\tau$ bytes.
+
+\begin{table}[ht]
+    \centering
+    \begin{tabular}{|l|r|r|r|}
+    \hline
+    \textbf{Component} & \textbf{$\Delta\G$} & \textbf{$\Delta\F$} & \textbf{$\Delta$ bytes} \\
+    \hline
+    $(S,K,C,v,\overline{r})$ & & & \\
+    $a$ & &  & $\tau$ \\
+    $\Pi_{\text{bal}}$ & & & \\
+    \hline
+    Total & & & $\tau$ \\
+    \hline
+    \end{tabular}
+    \caption{Mint transaction size change by component}
+    \label{table:size_mint}
+\end{table}
+
+\begin{table}[ht]
+    \centering
+    \begin{tabular}{|l|r|r|r|}
+    \hline
+    \textbf{Component} & \textbf{$\Delta\G$} & \textbf{$\Delta\F$} & \textbf{$\Delta$ bytes} \\
+    \hline
+    $f$ & & & \\
+    $\Pi_{\text{rp}}$ & & $1$ & \\
+    $\Pi_{\text{bal}}$ & & $1$ & \\
+    $\Pi_{\text{chaum}}$ & & & \\
+    $\Pi_{\text{par}}$ & & & \\
+    $\{S_u',C_u'\}_{u=0}^{w-1}$ & & & \\
+    $\{\overline{S}_j,\overline{K}_j,\overline{C}_j\}_{j=0}^{t-1}$ & & & \\
+    $\{\overline{r}_j\}$ & & & $\tau t$ \\
+    $\Pi_{\text{type}}$ & $2$ & $5$ & \\
+    \hline
+    Total & $2$ & $7$ & $\tau t$ \\
+    \hline
+    \end{tabular}
+    \caption{Spend transaction size change by component ($w$ consumed coins, $t$ generated coins)}
+    \label{table:size_spend}
+\end{table}
+
+Mint transactions increase by a single scalar, implying a $32$-byte increase in size.
+A spend transaction with $t$ generated coins increases by $288 + \tau t$ bytes; since typical spends generate two output coins, if we assume $\tau = 8$, this implies a $304$-byte increase in size for such a transaction.
+
+We note that the changes to the Spark protocol introduced by Spats imply a marginal impact on verification efficiency.
+The only significant verification change is caused by the addition of the asset type equality proof, which has verification complexity scaling with $w + t$, where $w$ is the number of consumed coins in the spend transaction.
+Typically, both $w$ and $t$ are small, so the verification complexity of this proof is minimal compared to that of parallel one-of-many or range proof verification.
+
+
+\section{Deployment}
+
+We now describe implementation considerations relevant to deploying Spats as a future extension to the Spark protocol.
+
+It may be desirable to deploy an implementation of Spark initially, followed by a later protocol update to include Spats functionality.
+In this case, we note that a Spark value commitment is identical to a Spats extended value commitment with asset type $a = 0$.
+It is possible to deploy Spats-compatible extended range proofs, asset type equality proofs, and balance proofs using Spark commitments as inputs, reducing code complexity and possible technical debt.
+When creating a coin in a mint transaction, we require that $a = 0$ for verification of $\Pi_{\text{bal}}$.
+The use of asset type equality proofs in spend transactions will then ensure that all consumed and generated coins have the same zero type.
+
+We note that asset type equality proofs are necessary for this kind of staged deployment.
+If they were not included, it would be trivial to produce coins in a spend transaction with $a \neq 0$ that pass range proof verification, which could violate future issuance rules after a Spats update.
+
+\end{document}
