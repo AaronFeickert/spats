@@ -341,9 +341,14 @@ The only significant verification change is caused by the addition of the asset 
 Typically, both $w$ and $t$ are small, so the verification complexity of this proof is minimal compared to that of parallel one-of-many or range proof verification.
 
 
-\section{Deployment}
+\section{Deployment considerations}
 
 We now describe implementation considerations relevant to deploying Spats as a future extension to the Spark protocol.
+
+Spats considers fees to be denominated in the (hidden) asset type common to all coins in a transaction.
+While this simplifies the balance computation, it is problematic since fees are typically claimed by the miner of a ledger block containing the transaction, the address of which is not known until the block is mined.
+This recipient does not know the asset type in which the fee is denominated, and may not even wish to claim fees in certain assets.
+One approach to this issue is to use a common asset type for fees; however, this would necessitate changes to the protocol that should be carefully considered.
 
 It may be desirable to deploy an implementation of Spark initially, followed by a later protocol update to include Spats functionality.
 In this case, we note that a Spark value commitment is identical to a Spats extended value commitment with asset type $a = 0$.
