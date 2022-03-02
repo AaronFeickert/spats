@@ -2,45 +2,81 @@
 \usepackage[utf8]{inputenc}
 \usepackage{amsmath,amssymb,amsthm,amsfonts}
 \usepackage{mathtools}
+\usepackage{hyperref}
+\usepackage{authblk}
 
 \newcommand{\G}{\mathbb{G}}
 \newcommand{\F}{\mathbb{F}}
 \newcommand{\func}[1]{\mathsf{#1}}
+\newcommand{\addr}{\func{addr}}
 \newcommand{\comm}{\func{Comm}}
 \newcommand{\hash}{\mathcal{H}}
 
 \title{Spats: user-defined confidential assets for the Spark transaction protocol}
-\author{Aaron Feickert \\ Aram Jivanyan}
+\author[1]{Aaron Feickert}
+\author[2,3]{Aram Jivanyan\thanks{Corresponding author: \texttt{aram@firo.org}}}
+\affil[1]{Cypher Stack}
+\affil[2]{Firo}
+\affil[3]{Yerevan State University}
 \date{\today}
 
 \begin{document}
 
 \maketitle
 
-This technical note describes Spats, a method for supporting user-defined confidential assets as an extension to the Spark transaction protocol.
-It does so by extending coin value commitments to bind and mask an asset type, and asserting in zero knowledge that all coins consumed or generated in a transaction share a common type.
-Other cryptographic components in the Spark protocol are modified as necessary to support the extended commitment structure.
-
-The research described in this note has not been formally reviewed, may contain errors, and should not be considered suitable for production.
+In privacy-preserving transaction protocols, confidential asset designs permit transfer of quantities of distinct asset types in a way that obscures their types and values.
+Spark is a protocol that provides flexible privacy properties relating to addressing, transaction sources and recipients, and value transfer; however, it does not natively support the use of multiple confidential asset types.
+Here we describe Spats, a new design for confidential assets compatible with Spark that focuses on efficient and modular implementation.
+It does so by extending coin value commitments to bind and mask an asset type, and asserting in zero knowledge that this type is maintained throughout transactions.
+We describe the cryptographic components and changes to the Spark protocol necessary for the design of Spats.
 
 
 \section{Introduction}
 
-We wish to construct user-defined assets as an extension to the Spark protocol.
-To do so, we add an \textit{asset type} to each coin generated as part of a mint or spend operation.
-Transaction validity is extended to require that all consumed and generated coins in a spend transaction share the same type, but in a way that does not reveal it.
-This ensures that the entire pool of Spark coins is available as a cover set for spend transactions, regardless of the type of the coins actually consumed.
+Privacy-preserving transaction protocols have seen a wealth of research.
+Protocols like RingCT \cite{ringct} in Monero, Sprout and Sapling \cite{zcash_sprout, zcash_sapling, zcash} in Zcash, Mimblewimble \cite{mw} in Grin and Beam, and Lelantus \cite{lelantus} in Firo each take different approaches toward privacy.
+These protocols may provide useful functionality relating to transaction graph ambiguity or obfuscation, addressing, amount confidentiality, and scaling.
+
+Spark \cite{spark} is a recent protocol, based on techniques from Lelantus, that provides trustless and flexible confidential transactions.
+In Spark, coins of hidden and arbitrary value can be transferred in a manner that uses zero-knowledge proofs to hide amounts and provide ambiguity as to the coins consumed in a transaction, while using a non-interactive ephemeral approach to dissociate recipient addresses from coins directed to them.
+
+However, Spark, like many other privacy-focused protocols, is limited to the transfer of a single asset type.
+The concept of confidential assets refers to protocol designs that permit the maintenance of distinct pools of value that can be transferred in a manner hiding the amounts and types of assets involved in transactions.
+
+Early work in this area was conducted by Poelstra and collaborators \cite{poelstra}, with the Bitcoin and Mimblewimble designs in mind.
+This approach to confidential assets uses Pedersen commitments with asset-specific generators to produce transactions where the types, amounts, and distributions of transferred assets are hidden; however, the transaction graph itself is only obscured up to the practical limits imposed by the overlying protocols.
+Further, this relative lack of information leakage comes at a cost: commitment range proofs cannot be aggregated to save space, and each generated coin must come equipped with a proof that it corresponds to a valid asset type.
+
+Later work by Beam \cite{lelantus_cla} extends the Lelantus protocol by applying Poelstra \textit{et al.}'s construction to take advantage of transaction graph obfuscation.
+In this design, the identity of consumed coins is hidden by re-randomized commitments, and one-of-many asset validity proofs use a design by Groth and Kohlweiss \cite{groth} (later optimized by Bootle and collaborators \cite{bootle}) with improved scaling.
+
+In this paper, we propose Spats, a new design for confidential assets that offers different tradeoffs in efficiency and information leakage.
+Unlike earlier work that relies on asset-specific commitment generators to separate assets for balance integrity, Spats coins bind to asset types using an extended commitment with fixed global generators.
+This design choice permits range proof aggregation; when used with range proof constructions like Bulletproofs \cite{bp} or Bulletproofs+ \cite{bp_plus} that scale logarithmically with the number of commitment assertions, the space savings can be impressive.
+Further, by restricting each transaction to a single hidden asset type in addition to a base asset used for fee handling, we replace multiple asset validity proofs with a single fixed-size asset type equality proof that applies to all consumed and generated coins of the hidden type.
+
+We note carefully that a modification of the full protocol security model of \cite{spark} accounting for our changes, while important, is deferred to future work.
 
 
 \section{Primitives}
 
-We describe cryptographic constructions required for the Spats protocol.
+We describe the cryptographic constructions required for the Spats protocol.
+Throughout this paper, let $\G$ be a prime-order group where the discrete logarithm, computational Diffie-Hellman, and decisional Diffie-Hellman problems are hard, and let $\F$ be its scalar field.
+
+
+\subsection{Extended commitments}
+
+The constructions used in Spats, like some of those used in the original Spark protocol, use homomorphic commitments with two independent value components; for clarity, we refer to these as \textit{extended commitments}.
+Such a commitment scheme is common, and is often used more generally to bind to and hide a vector of values with a single mask.
+The public parameters are $pp_{\text{com}} = (\G, \F, F, G, H)$, where $F, G, H \in \G$ are independent public generators; that is, they have no efficiently-computable discrete logarithm relationship.
+The commitment scheme consists of a function $\func{Comm}: \F^3 \to \G$ that is additively homomorphic.
+For our purposes, we let $\func{Comm}$ be a Pedersen commitment, where $$\func{Comm}(v, v', m) = vF + v'G + mH$$ for all values $v, v' \in \F$ and masks $m \in \F$.
 
 
 \subsection{Parallel one-of-many proving system}
 
-The parallel one-of-many proving system definition is modified to support extended commitments.
-The public parameters are $pp_{\text{par}} = (\G, \F, n, m, pp_{\text{comm}})$, where $pp_{\text{com}}$ are the public parameters for an extended commitment construction.
+The parallel one-of-many proving system definition used in Spark is modified to support extended commitments.
+The public parameters are $pp_{\text{par}} = (n, m, pp_{\text{comm}})$, where $pp_{\text{com}}$ are the public parameters for an extended commitment construction.
 The algorithm tuple $(\func{ParallelProve}, \func{ParallelVerify})$ is modified to support the following relation:
 \begin{multline*}
 \left\{ pp_{\text{par}}, \{S_k,V_k\}_{k=0}^{N-1} \subset \G^2, S',V' \in \G ; l \in \mathbb{N}, (s,v) \in \F : \right. \\
@@ -53,16 +89,19 @@ The existing parallel one-of-many proving system in the Spark protocol is trivia
 \subsection{Range proving system}
 
 The range proving construction is modified to support extended commitments.
-The public parameters are $pp_{\text{rp}} = (\G, \F, v_{\text{max}}, pp_{\text{comm}})$, where $pp_{\text{comm}}$ are the public parameters for an extended commitment construction.
+The public parameters are $pp_{\text{rp}} = (v_{\text{max}}, pp_{\text{comm}})$, where $pp_{\text{comm}}$ are the public parameters for an extended commitment construction.
 The algorithm tuple $(\func{RangeProve}, \func{RangeVerify})$ is modified to support the following relation:
-$$\{ pp_{\text{rp}}, C \in \G ; (a, v, r) \in \F : 0 \leq v < v_{\text{max}}, C = \comm(a, v, r) \}$$
+\begin{multline*}
+\{ pp_{\text{rp}}, \{C_j\}_{j=1}^m \in \G ; \{(a_j, v_j, r_j)\}_{j=1}^m \in \F : \\
+\forall j \in [1,m], 0 \leq v_j < v_{\text{max}}, C_j = \comm(a_j, v_j, r_j) \}
+\end{multline*}
 
-We describe here a modification to the Bulletproofs+ range proving system to support this construction; extending this further to support aggregation of multiple commitments in a single proof is straightforward.
-We defer a full security analysis of these changes to future work.
-Note that we use additive notation to describe these changes, in order to match this convention in the Spark protocol.
+We describe here a modification to the Bulletproofs+ range proving system to support this construction.
+A work-in-progress report \cite{extended_bp_plus} provides a partial security proof.
+Note that we use additive notation to describe these changes, in order to match this convention in the Spark protocol, and we describe here only those aspects of the prover and verifier algorithms that are modified from those in \cite{bp_plus}.
 
 The prover selects a value $\underline{\alpha} \in \F$ uniformly at random.
-It constructs $$A = \vec{a}_L \vec{G} + \vec{a}_R \vec{H} + \comm(\underline{\alpha}, 0, \alpha)$$ and defines $\widehat{\underline{\alpha}} = \underline{\alpha} + ay^{n+1}$ as an additional witness to the weighted inner-product argument protocol we describe now.
+It constructs $$A = \vec{a}_L \vec{G} + \vec{a}_R \vec{H} + \comm(\underline{\alpha}, 0, \alpha)$$ and defines $$\widehat{\underline{\alpha}} = \underline{\alpha} + \sum_{j=1}^m z^{2j}a_j y^{mn+1}$$ as an additional witness to the weighted inner-product argument protocol we describe now.
 
 The zero-knowledge weighted inner-product protocol is modified to support the following relation:
 \begin{multline*}
@@ -93,13 +132,26 @@ $$e^2 P + eA + B = (r'e)\vec{G} + (s'e)\vec{H} + \comm(\underline{\delta}', r' \
 Observe that this construction adds only $\underline{\delta}'$ to the overall proof structure.
 
 
+\subsection{Aggregated representation proof}
+
+We require a proving system to assert in zero knowledge that the prover knows discrete logarithm representations of a set of extended commitments with a zero component.
+In the context of Spats, this is used to show that certain extended commitments reduce to standard commitments by setting one component's discrete logarithm to zero, and is useful by allowing optimal aggregation of commitment range proofs for space efficiency.
+Let $pp_{\text{agg}} = (pp_{\text{comm}})$ be the public parameters of such a proving system, where $pp_{\text{comm}}$ are the public parameters for an extended commitment construction.
+
+The proving system is a tuple of algorithms $(\func{AggProve}, \func{AggVerify})$ for the following relation:
+$$\{ pp_{\text{agg}}, \{C_i\}_{i=0}^{n-1} ; (\{y_i, z_i\}_{i=0}^{n-1}) : \forall i \in [0,n), C_i = \comm(0, y_i, z_i) \}$$
+
+The batch Schnorr proving system described in \cite{batch_schnorr} may be easily generalized for this purpose, since an extended commitment with a zero component is algebraically equivalent to a standard Pedersen commitment.
+
+
 \subsection{Asset type equality proof}
 
 We introduce a new proving system to prove in zero knowledge that a set of extended commitments share a common single discrete logarithm in one component.
-Let $$pp_{\text{type}} = (\G, \F, pp_{\text{comm}})$$ be the public parameters of such a proving system, where $\G$ is a prime-order group where the discrete logarithm problem is hard, $\F$ is its scalar field, and $pp_{\text{comm}}$ are the public parameters for an extended commitment construction.
+In the context of Spats, this proving system will be used to assert in zero knowledge that coins consumed and generated in a transaction share a common asset type.
+Let $$pp_{\text{type}} = (pp_{\text{comm}})$$ be the public parameters of such a proving system, where $pp_{\text{comm}}$ are the public parameters for an extended commitment construction.
 
 The proving system is a tuple of algorithms $(\func{TypeProve}, \func{TypeVerify})$ for the following relation:
-$$\{ pp_{\text{type}}, \{C_i\}_{i=0}^{n-1} ; (x, \{y_i, z_i\}_{i=0}^{n-1}) \in \F : \forall i \in [0,n), C_i = \comm(x, y_i, z_i) \}$$
+$$\{ pp_{\text{type}}, \{C_i\}_{i=0}^{n-1} \in \G ; (x, \{y_i, z_i\}_{i=0}^{n-1}) \in \F : \forall i \in [0,n), C_i = \comm(x, y_i, z_i) \}$$
 
 The protocol proceeds as follows:
 \begin{enumerate}
@@ -191,7 +243,8 @@ This completes the proof.
 
 We require a representation proof for use in balance assertion.
 It proves that a extended commitment is bound to a zero value.
-Let $$pp_{\text{bal}} = (\G, \F, pp_{\text{comm}})$$ be the public parameters of such a proving system, where $\G$ is a prime-order group where the discrete logarithm problem is hard, $\F$ is its scalar field, and $pp_{\text{comm}}$ are the public parameters for an extended commitment construction.
+In the context of Spats, this proving system will be used to assert that value is maintained between consumed and generated coins in a transaction.
+Let $$pp_{\text{bal}} = ( pp_{\text{comm}})$$ be the public parameters of such a proving system, where $pp_{\text{comm}}$ are the public parameters for an extended commitment construction.
 
 The proving system is a tuple of algorithms $(\func{BalanceProve}, \func{BalanceVerify})$ for the following relation:
 $$\{ pp_{\text{bal}}, C \in \G ; (x, z) \in \F : C = \comm(x, 0, z) \}$$
@@ -214,77 +267,177 @@ This construction is a sigma protocol for the given relation; the proof is stand
 
 \section{Protocol}
 
-We now describe the changes to the Spark protocol required for Spats.
+We now describe the changes to the Spark protocol algorithms required for Spats.
+We assume the use of notation from \cite{spark}.
+Note that key creation, address creation, and coin recovery are unchanged, so we do not repeat those algorithms here.
+
+In the Spats construction, an asset type is defined as a scalar $a \in \F$; all coins associated to a given asset type must share a common $a$.
+The intent is that asset types, like coin values, are bound to coins in a hidden manner and made public only when introducing new value into the system.
+Consensus rules must determine the conditions under which new value for any asset type may be added.
+
+As a matter of terminology and notational convenience, if a coin has asset type $a = 0$, we call it a \textit{base asset} coin; otherwise, we call it a \textit{generic asset} coin.
+
+\subsection{\texorpdfstring{$\func{CreateCoin}$}{CreateCoin}}
+
+This algorithm generates a new coin of arbitrary asset type destined for a given public address.
+It uses a type bit to determine if the value and asset type are intended to be publicly visible.
+
+\textbf{Inputs:} Destination public address $\addr_{\text{pk}}$, value $v \in [0, v_{\text{max}})$, memo $m$, asset type $a \in \F$, type bit $b$
+
+\textbf{Outputs:} Coin $\func{Coin}$, nonce $k$
+
+\begin{enumerate}
+\item Parse the recipient address $\addr_{\text{pk}} = (d, Q_1, Q_2)$.
+\item Sample a nonce $k \in \F$.
+\item Compute the recovery key $K = \hash_k(k)\hash_{\text{div}}(d)$.
+\item Compute the serial number commitment $$S = \comm(\hash_{\text{ser}}(k), 0, 0) + Q_2.$$
+\item Generate the value commitment $C = \comm(a, v, \hash_{\text{val}}(k))$.
+\item If $b = 0$, set the recipient data $r = (v,a,d,k,m)$; otherwise, set $r = (d,k,m)$.
+\item Generate an AEAD encryption key $k_{\text{aead}} = \func{AEADKeyGen}(\hash_k(k)Q_1)$; encrypt the recipient data $$\overline{r} = \func{AEADEncrypt}(k_{\text{aead}},\texttt{r},r).$$
+\item If $b=0$, output the coin $\func{Coin} = (S, K, C, \overline{r})$ and nonce $k$; otherwise, output the coin $\func{Coin} = (S, K, C, v, a, \overline{r})$ and nonce $k$.
+\end{enumerate}
+The case $b=0$ represents a coin with hidden value being generated in a spend transaction, while the case $b=1$ represents a coin with plaintext value being generated in a mint transaction.
 
 
-\subsection{Asset types}
+\subsection{\texorpdfstring{$\func{Mint}$}{Mint}}
 
-An asset type is a value $a \in \F$.
-By convention, we let $a = 0$ represent a default type; this permits (as discussed below) the use of certain Spats-compatible primitives in the original Spark protocol if desired for forward compatibility.
+This algorithm generates new coins of arbitrary asset type from either a mining-type process defined by consensus rules, or by consuming non-Spark outputs from a base layer with public value.
+Note that while such implementation-specific auxiliary data may be necessary for generating such a transaction and included, we do not specifically list this here.
 
-Asset types need not be selected randomly, but may be.
+\textbf{Inputs}: Set of $t$ output coin public addresses, values, memos, and asset types: $$\{\addr_{\text{pk},j}, v_j, m_j, a_j\}_{j=0}^{t-1}$$
 
+\textbf{Outputs}: Mint transaction $\text{tx}_{\text{mint}}$
 
-\subsection{Coins}
-
-The value commitment in coins is modified to use an extended commitment.
-For a coin with asset type $a$, value $v$, and nonce $k$, the value commitment is $C = \comm(a, v, \hash_{\text{val}}(k))$.
-
-The range proof for the coin value commitment uses our modified proving system to support the extended commitment:
-$$\Pi_{\text{rp}} = \func{RangeProve}(pp_{\text{rp}}, C ; (a, v, \hash_{\text{val}}(k)))$$
-
-The recipient data is updated to include the asset type if necessary.
-That is, if $b = 0$ we have $r = (a, v, d, k, m)$.
-
-If $b = 0$, the coin is the tuple $\func{Coin} = (S, K, C, \Pi_{\text{rp}}, \overline{r})$.
-If $b = 1$, the coin is the tuple $\func{Coin} = (S, K, C, a, v, \overline{r})$.
+\begin{enumerate}
+    \item Generate a set $\func{OutCoins} = \{\func{CreateCoin}(\addr_{\text{pk},j}, v_j, m_j, a_j, 1)\}_{j=0}^{t-1}$ of output coins.
+    \item Parse the output coin value commitments $\{\overline{C}_j\}_{j=0}^{t-1}$ from $\func{OutCoins}$, where each $\overline{C}_j$ contains nonce $k_j$.
+    \item Generate a representation proof for value assertion: $$\Pi_{\text{val}} = \func{RepProve}\left( pp_{\text{rep}}, H, \{ \overline{C}_j - \comm(a_j, v_j, 0) \}_{j=0}^{t-1}; \{\hash_{\text{val}}(k_j)\}_{j=0}^{t-1} \right)$$
+    \item Output the mint transaction $\func{tx}_{\text{mint}} = (\func{OutCoins}, \Pi_{\text{val}})$.
+\end{enumerate}
 
 
-\subsection{Mints}
+\subsection{\texorpdfstring{$\func{Identify}$}{Identify}}
 
-The value representation proof is updated to include the asset type:
-$$\Pi_{\text{bal}} = \func{RepProve}(pp_{\text{rep}}, \comm(0,0,1), C - \comm(a, v, 0) ; (\hash_{\text{val}}(k)))$$
+This algorithm allows a recipient (or designated entity) to determine if it controls a coin; if so, it computes the value, memo, and diversifier from the coin (in addition to the coin nonce).
+It requires the incoming view key used to produce diversified addresses to do so.
+If the coin is not destined for any diversified address, the algorithm returns failure.
 
+It is assumed that the recipient has run the $\func{Verify}$ algorithm on the transaction generating the coin being identified.
 
-\subsection{Identification and recovery}
+\textbf{Inputs:} Incoming view key $\addr_{\text{in}}$, coin $\func{Coin}$
 
-Coin identification is modified to test the value commitment against the asset type.
-If the coin was generated in a spend transaction, the recipient data is decrypted to obtain $r = (a, v, d, k, m)$.
-The value commitment is checked to ensure that $C = \comm(a, v, \hash_{\text{val}}(k))$.
+\textbf{Outputs:} Value $v$, memo $m$, asset type $a$, diversifier $i$, nonce $k$
 
-Coin recovery is unchanged.
-
-
-\subsection{Spends}
-
-Spend transactions are updated to account for extended commitments and assert balance properly.
-Each value commitment offset is extended:
-$$C_u' = \comm(a, v_u, \hash_{\text{val}'}(s_u, D))$$
-The balance proof uses our new construction:
-\begin{multline*}
-    \Pi_{\text{bal}} = \func{BalanceProve}\left( pp_{\text{bal}}, \sum_{u=0}^{w-1} C_u' - \sum_{j=0}^{t-1} \overline{C}_j - \comm(0,f,0); \right. \\
-    \left. \left( (w + t)a, \sum_{u=0}^{w-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=0}^{t-1} \hash_{\text{val}}(k_j) \right) \right)
-\end{multline*}
-A proof of asset type equality is added to the transaction:
-\begin{multline*}
-    \Pi_{\text{type}} = \func{TypeProve}\left( pp_{\text{type}}, \{C_u'\}_{u=0}^{w-1} \cup \{\overline{C}_j\}_{j=0}^{t-1} ; \right. \\
-    \left. \left( a, \{ v_u, \hash_{\text{val}'}(s_u,D) \}_{u=0}^{w-1} \cup \{ \overline{v}_j, \hash_{\text{val}}(k_j) \}_{j=0}^{t-1} \right) \right)
-\end{multline*}
-The binding hash $\mu$ is updated to include $\Pi_{\text{type}}$ in its input.
+\begin{enumerate}
+\item Parse the incoming view key $\addr_{\text{in}} = (s_1, P_2)$.
+\item If $\func{Coin}$ was generated in a mint transaction, parse $\func{Coin} = (S, K, C, v, a, \overline{r})$; otherwise, parse $\func{Coin} = (S, K, C, \overline{r})$.
+\item Generate an AEAD encryption key $k_{\text{aead}} = \func{AEADKeyGen}(s_1 K)$ and decrypt $$r = \func{AEADDecrypt}(k_{\text{aead}},\texttt{r},\overline{r});$$ if decryption fails, return failure.
+\item If $\func{Coin}$ was generated in a mint transaction, parse the recipient data $r = (d, k, m)$; otherwise, parse $r = (v, a, d, k, m)$.
+\item Check that $K = \hash_k(k)\hash_{\text{div}}(d)$, and return failure otherwise.
+\item Check that $C = \comm(a,v,\hash_{\text{val}}(k))$, and return failure otherwise.
+\item Decrypt the diversifier $i = \func{SymDecrypt}(\func{SymKeyGen}(s_1),d)$.
+\item Check that $$S = \comm(\hash_{\text{ser}}(k),0,0) + \comm(\hash_{Q_2}(s_1,i),0,0) + P_2,$$ and return failure otherwise.
+\item Output $(v, m, a, i, k)$.
+\end{enumerate}
 
 
-\subsection{Verification}
+\subsection{\texorpdfstring{$\func{Spend}$}{Spend}}
 
-Verification is updated to account for the changes to mint and spend transactions.
+This algorithm allows a recipient to generate a transaction that consumes coins it controls, and generates new coins destined for arbitrary public addresses.
+A spend transaction spends coins of two asset types separately; one is a generic asset type (where the type itself is hidden), and the other is the base asset type.
+This ensures that fees can be denominated consistently and publicly.
 
-When verifying a mint transaction, the asset type $a$ is also parsed from the coin, after which the value representation verification is performed:
-$$\func{RepVerify}(pp_{\text{rep}}, \Pi_{\text{bal}}, \comm(0,0,1), C - \comm(a,v,0))$$
+It is assumed that the recipient has run the $\func{Recover}$ algorithm on all coins that it wishes to consume in such a transaction.
 
-When verifying a spend transaction, the verifications
-$$\func{TypeVerify}(pp_{\text{type}}, \Pi_{\text{type}}, \{C_u'\}_{u=0}^{w-1} \cup \{\overline{C}_j\}_{j=0}^{t-1})$$
-and
-$$\func{BalanceVerify}\left( pp_{\text{bal}}, \Pi_{\text{bal}}, \sum_{u=0}^{w-1} C_u' - \sum_{j=0}^{t-1} \overline{C}_j - \comm(0,f,0) \right)$$
-are performed.
+\textbf{Inputs:}
+\begin{itemize}
+    \item A full view key $\addr_{\text{full}}$
+    \item A spend key $\addr_{\text{sk}}$
+    \item A set of $N$ input coins $\func{GenericInCoins}$, of generic asset type, as part of a cover set
+    \item A set of $N$ input coins $\func{BaseInCoins}$, of base asset type, as part of a cover set
+    \item For each $u \in [0,\underline{w})$ coin of generic type $a \neq 0$ to spend, the index in $\func{GenericInCoins}$, serial number, tag, value, and nonce: $(\underline{l}_u, \underline{s}_u, \underline{T}_u, \underline{v}_u, \underline{k}_u)$
+    \item For each $u \in [0,w)$ coin of base type $a = 0$ to spend, the index in $\func{BaseInCoins}$, serial number, tag, value, and nonce: $(l_u, s_u, T_u, v_u, k_u)$
+    \item An integer fee value $f \in [0,v_{\text{max}})$
+    \item A set of $\underline{t}$ generic-type output coin public addresses, values, and memos: $$\{\underline{\addr}_{\text{pk},j}, \underline{v}_j, \underline{m}_j\}_{j=0}^{t-1}$$
+    \item A set of $t$ base-type output coin public addresses, values, and memos: $$\{\addr_{\text{pk},j}, v_j, m_j\}_{j=0}^{t-1}$$
+\end{itemize}
+
+\textbf{Outputs:} Spend transaction $\text{tx}_{\text{spend}}$
+
+\begin{enumerate}
+    \item Parse the required full view key component $D$ from $\addr_{\text{full}}$.
+    \item Parse the spend key $\addr_{\text{sk}} = (s_1, s_2, r)$.
+    \item Parse the cover set serial number commitments and value commitments $\{(S_i, C_i)\}_{i=0}^{N-1}$ from $\func{BaseInCoins}$ and $\{(\underline{S}_i, \underline{C}_i)\}_{i=0}^{N-1}$ from $\func{GenericInCoins}$.
+    \item For each $u \in [0,w)$:
+    \begin{enumerate}
+        \item Compute the serial number commitment offset: $$S_u' = \comm(s_u, 0, -\hash_{\text{ser}'}(s_u, D)) + D$$
+        \item Compute the value commitment offset: $$C_u' = \comm(0, v_u, \hash_{\text{val}'}(s_u, D))$$
+        \item Generate a parallel one-out-of-many proof:
+        \begin{multline*}
+        (\Pi_{\text{par}})_u = \func{ParProve}(pp_{\text{par}},\{S_i, C_i\}_{i=0}^{N-1}, S_u',C_u'; \\
+        (l_u, \hash_{\text{ser}'}(s_u, D), \hash_{\text{val}}(k_u) - \hash_{\text{val}'}(s_u, D)))
+        \end{multline*}
+    \end{enumerate}
+    \item For each $u \in [0,\underline{w})$:
+    \begin{enumerate}
+        \item Compute the serial number commitment offset: $$\underline{S}_u' = \comm(\underline{s}_u, 0, -\hash_{\text{ser}'}(\underline{s}_u, D)) + D$$
+        \item Compute the value commitment offset: $$\underline{C}_u' = \comm(a, \underline{v}_u, \hash_{\text{val}'}(\underline{s}_u, D))$$
+        \item Generate a parallel one-out-of-many proof:
+        \begin{multline*}
+        (\underline{\Pi}_{\text{par}})_u = \func{ParProve}(pp_{\text{par}},\{\underline{S}_i, \underline{C}_i\}_{i=0}^{N-1}, \underline{S}_u',\underline{C}_u'; \\
+        (\underline{l}_u, \hash_{\text{ser}'}(\underline{s}_u, D), \hash_{\text{val}}(\underline{k}_u) - \hash_{\text{val}'}(\underline{s}_u, D)))
+        \end{multline*}
+    \end{enumerate}
+    \item Generate a set $\func{BaseOutCoins} = \{\func{CreateCoin}(\addr_{\text{pk},j}, v_j, m_j, 0, 0)\}_{j=0}^{t-1}$ of base-type output coins.
+    \item Generate a set $\func{GenericOutCoins} = \{\func{CreateCoin}(\underline{\addr}_{\text{pk},j}, \underline{v}_j, \underline{m}_j, a, 0)\}_{j=0}^{\underline{t}-1}$ of generic-type output coins.
+    \item Parse the coin value commitments $\{\overline{C}_j\}_{j=0}^{t-1}$ from $\func{BaseOutCoins}$, where each $\overline{C}_j$ is associated to nonce $\overline{k}_j$.
+    \item Parse the coin value commitments $\{\underline{\overline{C}}_j\}_{j=0}^{\underline{t}-1}$ from $\func{GenericOutCoins}$, where each $\underline{\overline{C}}_j$ is associated to nonce $\underline{\overline{k}}_j$.
+    \item Generate an aggregated range proof for all output coins:
+    \begin{multline*}
+        \Pi_{\text{rp}} = \func{RangeProve}\left( pp_{\text{rp}}, \{\overline{C}_j\}_{j=0}^{t-1} \cup \{\underline{\overline{C}}_j\}_{j=0}^{\underline{t}-1} ; \right. \\
+        \left. \{(0, v_j, \hash_{\text{val}}(\overline{k}_j))\}_{j=0}^{t-1} \cup \{(a, \underline{v}_j, \hash_{\text{val}}(\underline{\overline{k}}_j))\}_{j=0}^{\underline{t}-1} \right)
+    \end{multline*}
+    \item Generate a proof that all base-type assets have $a = 0$: $$\Pi_{\text{base}} = \func{AggProve}\left( pp_{\text{agg}}, \{\overline{C}_j\}_{j=0}^{t-1} ; (\{v_j, \hash_{\text{val}}(\overline{k_j})\}_{j=0}^{t-1}) \right)$$
+    \item Generate a proof that all generic-type coins have the same type:
+    \begin{multline*}
+        \Pi_{\text{type}} = \func{TypeProve}\left( pp_{\text{type}}, \{\underline{C}'_u\}_{u=0}^{\underline{w}-1} \cup \{\underline{\overline{C}}_j\}_{j=0}^{\underline{t}-1} ; \right. \\
+        \left. \left(a, \{\underline{v}_u, \hash_{\text{val}'}(\underline{s}_u,D)\}_{u=0}^{\underline{w}-1} \cup \{\underline{v}_j, \hash_{\text{val}}(\underline{\overline{k}}_j)\}_{j=0}^{\underline{t}-1}\right) \right)
+    \end{multline*}
+    \item Generate representation proofs for balance assertion:
+    \begin{multline*}
+    \Pi_{\text{bal}} = \func{RepProve}\left( pp_{\text{rep}}, H, \sum_{u=0}^{w-1} C_u' - \sum_{j=0}^{t-1} \overline{C}_j - \comm(0,f,0); \right. \\
+    \left. \sum_{u=0}^{w-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=0}^{t-1} \hash_{\text{val}}(\overline{k}_j) \right)
+    \end{multline*}
+    \begin{multline*}
+    \underline{\Pi}_{\text{bal}} = \func{RepProve}\left( pp_{\text{rep}}, H, \sum_{u=0}^{\underline{w}-1} \underline{C}_u' - \sum_{j=0}^{\underline{t}-1} \underline{\overline{C}}_j; \right. \\
+    \left. \sum_{u=0}^{\underline{w}-1} \hash_{\text{val}'}(\underline{s}_u,D) - \sum_{j=0}^{\underline{t}-1} \hash_{\text{val}}(\underline{\overline{k}}_j) \right)
+    \end{multline*}
+    \item Define the following binding hash:
+    \begin{multline*}
+        \mu = \hash_{\text{bind}}( \func{BaseInCoins}, \func{GenericInCoins}, \func{BaseOutCoins}, \func{GenericOutCoins}, \\
+        \left\{ S_u', C_u', T_u, (\Pi_{\text{par}})_u, \right\}_{u=0}^{w-1}, \left\{ \underline{S}_u', \underline{C}_u', \underline{T}_u, (\underline{\Pi}_{\text{par}})_u, \right\}_{u=0}^{\underline{w}-1}, \\
+        \Pi_{\text{base}}, \Pi_{\text{rp}}, \Pi_{\text{bal}}, \underline{\Pi}_{\text{bal}}, \Pi_{\text{type}} )
+    \end{multline*}
+    \item Generate a modified Chaum-Pedersen proof, where we additionally bind $\mu$ to the initial transcript:
+    \begin{multline*}
+    \Pi_{\text{chaum}} = \func{ChaumProve}((pp_{\text{chaum}}, \mu), \{S_u', T_u\}_{u=0}^{w-1} \cup \{\underline{S}_u', \underline{T}_u\}_{u=0}^{\underline{w}-1}; \\
+    (\{s_u, r, -\hash_{\text{ser}'}(s_u, D)\}_{u=0}^{w-1} \cup \{\underline{s}_u, r, -\hash_{\text{ser}'}(\underline{s}_u, D)\}_{u=0}^{\underline{w}-1}))
+    \end{multline*}
+    \item Output the tuple:
+    \begin{multline*}
+    \text{tx}_{\text{spend}} = ( \func{BaseInCoins}, \func{GenericInCoins}, \func{BaseOutCoins}, \func{GenericOutCoins}, \\
+    f, \left\{ S_u', C_u', T_u, (\Pi_{\text{par}})_u \right\}_{u=0}^{w-1}, \left\{ \underline{S}_u', \underline{C}_u', \underline{T}_u, (\underline{\Pi}_{\text{par}})_u \right\}_{u=0}^{\underline{w}-1}, \\
+    \Pi_{\text{base}}, \Pi_{\text{rp}}, \Pi_{\text{bal}}, \underline{\Pi}_{\text{bal}}, \Pi_{\text{type}}, \Pi_{\text{chaum}} )
+    \end{multline*}
+\end{enumerate}
+
+Observe that this effectively maintains two ``pools" of coins available for cover sets.
+Coins minted with $a = 0$, or those generated in spends produced by consuming base-type coins, are the only coins used for producing $\func{BaseInCoins}$ cover sets.
+Coins minted with $a \neq 0$, or those generated in spends produced by consuming generic-type coins, are the only coins used for $\func{GenericInCoins}$ cover sets.
+
+Also note that it is possible to aggregate all output coin range proofs using a suitable range proving system; this is particularly relevant for designs like those of \cite{bp,bp_plus} that scale logarithmically in size for aggregation purposes.
+
+Transaction verification is modified in a straightforward manner to verify the relevant proofs.
 
 
 \section{Efficiency}
@@ -299,14 +452,12 @@ We assume throughout that both group and scalar elements have $32$-byte represen
     \hline
     \textbf{Component} & \textbf{$\Delta\G$} & \textbf{$\Delta\F$} & \textbf{$\Delta$ bytes} \\
     \hline
-    $(S,K,C,v,\overline{r})$ & & & \\
-    $a$ & &  & $\tau$ \\
-    $\Pi_{\text{bal}}$ & & & \\
+    $a$ & &  & $\tau\underline{t}$ \\
     \hline
-    Total & & & $\tau$ \\
+    Total & & & $\tau\underline{t}$ \\
     \hline
     \end{tabular}
-    \caption{Mint transaction size change by component}
+    \caption{Mint transaction size change by component ($\underline{t}$ generated generic-type coins)}
     \label{table:size_mint}
 \end{table}
 
@@ -316,47 +467,25 @@ We assume throughout that both group and scalar elements have $32$-byte represen
     \hline
     \textbf{Component} & \textbf{$\Delta\G$} & \textbf{$\Delta\F$} & \textbf{$\Delta$ bytes} \\
     \hline
-    $f$ & & & \\
     $\Pi_{\text{rp}}$ & & $1$ & \\
     $\Pi_{\text{bal}}$ & & $1$ & \\
-    $\Pi_{\text{chaum}}$ & & & \\
-    $\Pi_{\text{par}}$ & & & \\
-    $\{S_u',C_u'\}_{u=0}^{w-1}$ & & & \\
-    $\{\overline{S}_j,\overline{K}_j,\overline{C}_j\}_{j=0}^{t-1}$ & & & \\
-    $\{\overline{r}_j\}$ & & & $\tau t$ \\
+    $\underline{\Pi}_{\text{bal}}$ & $1$ & $2$ & \\
+    $\Pi_{\text{base}}$ & $2$ & $2$ & \\
+    $\{\overline{r}_j\}$ & & & $\tau\underline{t}$ \\
     $\Pi_{\text{type}}$ & $2$ & $5$ & \\
     \hline
-    Total & $2$ & $7$ & $\tau t$ \\
+    Total & $5$ & $11$ & $\tau \underline{t}$ \\
     \hline
     \end{tabular}
-    \caption{Spend transaction size change by component ($w$ consumed coins, $t$ generated coins)}
+    \caption{Spend transaction size change by component ($\underline{t}$ generated generic-type coins)}
     \label{table:size_spend}
 \end{table}
 
-Mint transactions increase by a single scalar, implying a $32$-byte increase in size.
-A spend transaction with $t$ generated coins increases by $288 + \tau t$ bytes; since typical spends generate two output coins, if we assume $\tau = 8$, this implies a $304$-byte increase in size for such a transaction.
-
-We note that the changes to the Spark protocol introduced by Spats imply a marginal impact on verification efficiency.
-The only significant verification change is caused by the addition of the asset type equality proof, which has verification complexity scaling with $w + t$, where $w$ is the number of consumed coins in the spend transaction.
-Typically, both $w$ and $t$ are small, so the verification complexity of this proof is minimal compared to that of parallel one-of-many or range proof verification.
+A mint transaction with $\underline{t}$ generated generic-type coins increases by $\tau\underline{t}$ bytes.
+A spend transaction with $\underline{t}$ generated generic-type coins increases by $512 + \tau t$ bytes.
 
 
-\section{Deployment considerations}
-
-We now describe implementation considerations relevant to deploying Spats as a future extension to the Spark protocol.
-
-Spats considers fees to be denominated in the (hidden) asset type common to all coins in a transaction.
-While this simplifies the balance computation, it is problematic since fees are typically claimed by the miner of a ledger block containing the transaction, the address of which is not known until the block is mined.
-This recipient does not know the asset type in which the fee is denominated, and may not even wish to claim fees in certain assets.
-One approach to this issue is to use a common asset type for fees; however, this would necessitate changes to the protocol that should be carefully considered.
-
-It may be desirable to deploy an implementation of Spark initially, followed by a later protocol update to include Spats functionality.
-In this case, we note that a Spark value commitment is identical to a Spats extended value commitment with asset type $a = 0$.
-It is possible to deploy Spats-compatible extended range proofs, asset type equality proofs, and balance proofs using Spark commitments as inputs, reducing code complexity and possible technical debt.
-When creating a coin in a mint transaction, we require that $a = 0$ for verification of $\Pi_{\text{bal}}$.
-The use of asset type equality proofs in spend transactions will then ensure that all consumed and generated coins have the same zero type.
-
-We note that asset type equality proofs are necessary for this kind of staged deployment.
-If they were not included, it would be trivial to produce coins in a spend transaction with $a \neq 0$ that pass range proof verification, which could violate future issuance rules after a Spats update.
+\bibliographystyle{plain}
+\bibliography{main}
 
 \end{document}
