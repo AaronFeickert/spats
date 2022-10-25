@@ -44,16 +44,18 @@ However, Spark, like many other privacy-focused protocols, is limited to the tra
 The concept of confidential assets refers to protocol designs that permit the maintenance of distinct pools of value that can be transferred in a manner hiding the amounts and types of assets involved in transactions.
 
 Early work in this area was conducted by Poelstra and collaborators \cite{poelstra}, with the Bitcoin and Mimblewimble designs in mind.
-This approach to confidential assets uses Pedersen commitments with asset-specific generators to produce transactions where the types, amounts, and distributions of transferred assets are hidden; however, the transaction graph itself is only obscured up to the practical limits imposed by the overlying protocols.
+This approach to confidential assets uses Pedersen commitments with asset-specific generators to produce transactions where the types, amounts, and distributions of transferred assets are hidden, with the advantage that multiple types may be included in a single transaction with balance separation; however, the transaction graph itself is only obscured up to the practical limits imposed by the overlying protocols.
 Further, this relative lack of information leakage comes at a cost: commitment range proofs cannot be aggregated to save space, and each generated coin must come equipped with a proof that it corresponds to a valid asset type.
 
 Later work by Beam \cite{lelantus_cla} extends the Lelantus protocol by applying Poelstra \textit{et al.}'s construction to take advantage of transaction graph obfuscation.
 In this design, the identity of consumed coins is hidden by re-randomized commitments, and one-of-many asset validity proofs use a design by Groth and Kohlweiss \cite{groth} (later optimized by Bootle and collaborators \cite{bootle}) with improved scaling.
+This design unfortunately inherits the range proof and type validity requirements of \cite{poelstra}.
 
 In this paper, we propose Spats, a new design for confidential assets that offers different tradeoffs in efficiency and information leakage.
-Unlike earlier work that relies on asset-specific commitment generators to separate assets for balance integrity, Spats coins bind to asset types using an extended commitment with fixed global generators.
+Unlike protocols that rely on asset-specific commitment generators to separate assets for balance integrity, Spats coins bind to asset types using an extended commitment with fixed global generators.
 This design choice permits range proof aggregation; when used with range proof constructions like Bulletproofs \cite{bp} or Bulletproofs+ \cite{bp_plus} that scale logarithmically with the number of commitment assertions, the space savings can be impressive.
-Further, by restricting each transaction to a single hidden asset type in addition to a base asset used for fee handling, we replace multiple asset validity proofs with a single fixed-size asset type equality proof that applies to all consumed and generated coins of the hidden type.
+Spats transactions require separate balance assertions for each hidden asset type present in a transaction.
+While this approach limits flexibility somewhat, it has the advantage of replacing separate expensive type validity proofs with a simpler and smaller fixed-size proof that applies to all consumed and generated coins of a given type.
 
 We note carefully that a modification of the full protocol security model of \cite{spark} accounting for our changes, while important, is deferred to future work.
 
@@ -275,7 +277,8 @@ In the Spats construction, an asset type is defined as a scalar $a \in \F$; all 
 The intent is that asset types, like coin values, are bound to coins in a hidden manner and made public only when introducing new value into the system.
 Consensus rules must determine the conditions under which new value for any asset type may be added.
 
-As a matter of terminology and notational convenience, if a coin has asset type $a = 0$, we call it a \textit{base asset} coin; otherwise, we call it a \textit{generic asset} coin.
+As a matter of terminology and notational convenience, if a coin has asset type $a = 0$, we call it a \textit{base asset} coin; if we do not specify a particular $a$, we call it a \textit{generic asset} coin.
+While Spats can be easily generalized such that this distinction is irrelevant, the implementation we describe here requires differentiation; this is to allow for transactions to include fees that are always denominated in the base asset type.
 
 \subsection{\texorpdfstring{$\func{CreateCoin}$}{CreateCoin}}
 
@@ -318,9 +321,9 @@ Note that while such implementation-specific auxiliary data may be necessary for
 
 \subsection{\texorpdfstring{$\func{Identify}$}{Identify}}
 
-This algorithm allows a recipient (or designated entity) to determine if it controls a coin; if so, it computes the value, memo, and diversifier from the coin (in addition to the coin nonce).
+This algorithm allows a recipient (or designated entity) to determine if it controls a coin; if so, it computes the value, memo, asset type, and diversifier from the coin (in addition to the coin nonce).
 It requires the incoming view key used to produce diversified addresses to do so.
-If the coin is not destined for any diversified address, the algorithm returns failure.
+If the coin is not destined for any diversified address assocated to the incoming view key, the algorithm returns failure.
 
 It is assumed that the recipient has run the $\func{Verify}$ algorithm on the transaction generating the coin being identified.
 
@@ -344,7 +347,7 @@ It is assumed that the recipient has run the $\func{Verify}$ algorithm on the tr
 \subsection{\texorpdfstring{$\func{Spend}$}{Spend}}
 
 This algorithm allows a recipient to generate a transaction that consumes coins it controls, and generates new coins destined for arbitrary public addresses.
-A spend transaction spends coins of two asset types separately; one is a generic asset type (where the type itself is hidden), and the other is the base asset type.
+A spend transaction spends coins of two asset types separately: one is a generic asset type $a = a'$ for some $a'$, and the other is the base asset type $a = 0$.
 This ensures that fees can be denominated consistently and publicly.
 
 It is assumed that the recipient has run the $\func{Recover}$ algorithm on all coins that it wishes to consume in such a transaction.
@@ -353,13 +356,10 @@ It is assumed that the recipient has run the $\func{Recover}$ algorithm on all c
 \begin{itemize}
     \item A full view key $\addr_{\text{full}}$
     \item A spend key $\addr_{\text{sk}}$
-    \item A set of $N$ input coins $\func{GenericInCoins}$, of generic asset type, as part of a cover set
-    \item A set of $N$ input coins $\func{BaseInCoins}$, of base asset type, as part of a cover set
-    \item For each $u \in [0,\underline{w})$ coin of generic type $a \neq 0$ to spend, the index in $\func{GenericInCoins}$, serial number, tag, value, and nonce: $(\underline{l}_u, \underline{s}_u, \underline{T}_u, \underline{v}_u, \underline{k}_u)$
-    \item For each $u \in [0,w)$ coin of base type $a = 0$ to spend, the index in $\func{BaseInCoins}$, serial number, tag, value, and nonce: $(l_u, s_u, T_u, v_u, k_u)$
+    \item A set of $N$ input coins $\func{InCoins}$ as a cover set, each of which was generated in a previous valid transaction
+    \item A set of indexes in $\func{InCoins}$, serial numbers, tags, values, and nonces $\{l_u, s_u, T_u, v_u, k_u\}_{u=0}^{w+w'-1}$ such that the $[0, w)$-subset corresponds to base coins with $a = 0$ to spend and the $[w, w')$-subset corresponds to generic coins of a common type $a'$ to spend
     \item An integer fee value $f \in [0,v_{\text{max}})$
-    \item A set of $\underline{t}$ generic-type output coin public addresses, values, and memos: $$\{\underline{\addr}_{\text{pk},j}, \underline{v}_j, \underline{m}_j\}_{j=0}^{t-1}$$
-    \item A set of $t$ base-type output coin public addresses, values, and memos: $$\{\addr_{\text{pk},j}, v_j, m_j\}_{j=0}^{t-1}$$
+    \item A set of output coin public addresses, values, and memos: $$\{\addr_{\text{pk},j}, v_j, m_j\}_{j=0}^{t+t'-1}$$ such that the $[0, t)$-subset corresponds to base coins with $a = 0$ to generate and the $[t, t')$-subset corresponds to coins of type $a'$ to generate
 \end{itemize}
 
 \textbf{Outputs:} Spend transaction $\text{tx}_{\text{spend}}$
@@ -367,41 +367,30 @@ It is assumed that the recipient has run the $\func{Recover}$ algorithm on all c
 \begin{enumerate}
     \item Parse the required full view key component $D$ from $\addr_{\text{full}}$.
     \item Parse the spend key $\addr_{\text{sk}} = (s_1, s_2, r)$.
-    \item Parse the cover set serial number commitments and value commitments $\{(S_i, C_i)\}_{i=0}^{N-1}$ from $\func{BaseInCoins}$ and $\{(\underline{S}_i, \underline{C}_i)\}_{i=0}^{N-1}$ from $\func{GenericInCoins}$.
-    \item For each $u \in [0,w)$:
+    \item Parse the cover set serial number commitments and value commitments $\{(S_i, C_i)\}_{i=0}^{N-1}$ from $\func{InCoins}$.
+    \item For each $u \in [0,w+w'-1)$:
     \begin{enumerate}
         \item Compute the serial number commitment offset: $$S_u' = \comm(s_u, 0, -\hash_{\text{ser}'}(s_u, D)) + D$$
-        \item Compute the value commitment offset: $$C_u' = \comm(0, v_u, \hash_{\text{val}'}(s_u, D))$$
+        \item Compute the value commitment offset: $$C_u' = \comm(a, v_u, \hash_{\text{val}'}(s_u, D))$$
         \item Generate a parallel one-out-of-many proof:
         \begin{multline*}
         (\Pi_{\text{par}})_u = \func{ParProve}(pp_{\text{par}},\{S_i, C_i\}_{i=0}^{N-1}, S_u',C_u'; \\
         (l_u, \hash_{\text{ser}'}(s_u, D), \hash_{\text{val}}(k_u) - \hash_{\text{val}'}(s_u, D)))
         \end{multline*}
     \end{enumerate}
-    \item For each $u \in [0,\underline{w})$:
-    \begin{enumerate}
-        \item Compute the serial number commitment offset: $$\underline{S}_u' = \comm(\underline{s}_u, 0, -\hash_{\text{ser}'}(\underline{s}_u, D)) + D$$
-        \item Compute the value commitment offset: $$\underline{C}_u' = \comm(a, \underline{v}_u, \hash_{\text{val}'}(\underline{s}_u, D))$$
-        \item Generate a parallel one-out-of-many proof:
-        \begin{multline*}
-        (\underline{\Pi}_{\text{par}})_u = \func{ParProve}(pp_{\text{par}},\{\underline{S}_i, \underline{C}_i\}_{i=0}^{N-1}, \underline{S}_u',\underline{C}_u'; \\
-        (\underline{l}_u, \hash_{\text{ser}'}(\underline{s}_u, D), \hash_{\text{val}}(\underline{k}_u) - \hash_{\text{val}'}(\underline{s}_u, D)))
-        \end{multline*}
-    \end{enumerate}
-    \item Generate a set $\func{BaseOutCoins} = \{\func{CreateCoin}(\addr_{\text{pk},j}, v_j, m_j, 0, 0)\}_{j=0}^{t-1}$ of base-type output coins.
-    \item Generate a set $\func{GenericOutCoins} = \{\func{CreateCoin}(\underline{\addr}_{\text{pk},j}, \underline{v}_j, \underline{m}_j, a, 0)\}_{j=0}^{\underline{t}-1}$ of generic-type output coins.
-    \item Parse the coin value commitments $\{\overline{C}_j\}_{j=0}^{t-1}$ from $\func{BaseOutCoins}$, where each $\overline{C}_j$ is associated to nonce $\overline{k}_j$.
-    \item Parse the coin value commitments $\{\underline{\overline{C}}_j\}_{j=0}^{\underline{t}-1}$ from $\func{GenericOutCoins}$, where each $\underline{\overline{C}}_j$ is associated to nonce $\underline{\overline{k}}_j$.
+    \item Generate a set $\func{OutCoins} = \{\func{CreateCoin}(\addr_{\text{pk},j}, v_j, m_j, a, 0)\}_{j=0}^{t+t'-1}$ of output coins.
+    \item Parse the coin value commitments $\{\overline{C}_j\}_{j=0}^{t+t'-1}$ from $\func{OutCoins}$, where each $\overline{C}_j$ is associated to nonce $\overline{k}_j$.
     \item Generate an aggregated range proof for all output coins:
+    $$\Pi_{\text{rp}} = \func{RangeProve}\left( pp_{\text{rp}}, \{\overline{C}_j\}_{j=0}^{t+t'-1} ; \{(a, v_j, \hash_{\text{val}}(\overline{k}_j))\}_{j=0}^{t+t'-1} \right)$$
+    \item Generate a proof that all base-type assets have $a = 0$:
     \begin{multline*}
-        \Pi_{\text{rp}} = \func{RangeProve}\left( pp_{\text{rp}}, \{\overline{C}_j\}_{j=0}^{t-1} \cup \{\underline{\overline{C}}_j\}_{j=0}^{\underline{t}-1} ; \right. \\
-        \left. \{(0, v_j, \hash_{\text{val}}(\overline{k}_j))\}_{j=0}^{t-1} \cup \{(a, \underline{v}_j, \hash_{\text{val}}(\underline{\overline{k}}_j))\}_{j=0}^{\underline{t}-1} \right)
+        \Pi_{\text{base}} = \func{AggProve}\left( pp_{\text{agg}}, \{C'_u\}_{u=0}^{w-1} \cup \{\overline{C}_j\}_{j=0}^{t-1} ; \right. \\
+        \left. \left( \{v_u, \hash_{\text{val}'}(s_u, D)\}_{u=0}^{w-1} \cup \{v_j, \hash_{\text{val}}(\overline{k_j})\}_{j=0}^{t-1} \right) \right)
     \end{multline*}
-    \item Generate a proof that all base-type assets have $a = 0$: $$\Pi_{\text{base}} = \func{AggProve}\left( pp_{\text{agg}}, \{\overline{C}_j\}_{j=0}^{t-1} ; (\{v_j, \hash_{\text{val}}(\overline{k_j})\}_{j=0}^{t-1}) \right)$$
     \item Generate a proof that all generic-type coins have the same type:
     \begin{multline*}
-        \Pi_{\text{type}} = \func{TypeProve}\left( pp_{\text{type}}, \{\underline{C}'_u\}_{u=0}^{\underline{w}-1} \cup \{\underline{\overline{C}}_j\}_{j=0}^{\underline{t}-1} ; \right. \\
-        \left. \left(a, \{\underline{v}_u, \hash_{\text{val}'}(\underline{s}_u,D)\}_{u=0}^{\underline{w}-1} \cup \{\underline{v}_j, \hash_{\text{val}}(\underline{\overline{k}}_j)\}_{j=0}^{\underline{t}-1}\right) \right)
+        \Pi_{\text{type}} = \func{TypeProve}\left( pp_{\text{type}}, \{C'_u\}_{u=w}^{w+w'-1} \cup \{\overline{C}_j\}_{j=t}^{t+t'-1} ; \right. \\
+        \left. \left( a, \{v_u, \hash_{\text{val}'}(s_u, D)\}_{u=w}^{w+w'-1} \cup \{v_j, \hash_{\text{val}}(\overline{k_j})\}_{j=t}^{t+t'-1} \right) \right)
     \end{multline*}
     \item Generate representation proofs for balance assertion:
     \begin{multline*}
@@ -409,33 +398,25 @@ It is assumed that the recipient has run the $\func{Recover}$ algorithm on all c
     \left. \sum_{u=0}^{w-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=0}^{t-1} \hash_{\text{val}}(\overline{k}_j) \right)
     \end{multline*}
     \begin{multline*}
-    \underline{\Pi}_{\text{bal}} = \func{RepProve}\left( pp_{\text{rep}}, H, \sum_{u=0}^{\underline{w}-1} \underline{C}_u' - \sum_{j=0}^{\underline{t}-1} \underline{\overline{C}}_j; \right. \\
-    \left. \sum_{u=0}^{\underline{w}-1} \hash_{\text{val}'}(\underline{s}_u,D) - \sum_{j=0}^{\underline{t}-1} \hash_{\text{val}}(\underline{\overline{k}}_j) \right)
+    \Pi_{\text{bal}'} = \func{RepProve}\left( pp_{\text{rep}}, H, \sum_{u=w}^{w+w'-1} C_u' - \sum_{j=t}^{t+t'-1} \overline{C}_j ; \right. \\
+    \left. \sum_{u=w}^{w+w'-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=t}^{t+t'-1} \hash_{\text{val}}(\overline{k}_j) \right)
     \end{multline*}
     \item Define the following binding hash:
     \begin{multline*}
-        \mu = \hash_{\text{bind}}( \func{BaseInCoins}, \func{GenericInCoins}, \func{BaseOutCoins}, \func{GenericOutCoins}, \\
-        \left\{ S_u', C_u', T_u, (\Pi_{\text{par}})_u, \right\}_{u=0}^{w-1}, \left\{ \underline{S}_u', \underline{C}_u', \underline{T}_u, (\underline{\Pi}_{\text{par}})_u, \right\}_{u=0}^{\underline{w}-1}, \\
-        \Pi_{\text{base}}, \Pi_{\text{rp}}, \Pi_{\text{bal}}, \underline{\Pi}_{\text{bal}}, \Pi_{\text{type}} )
+        \mu = \hash_{\text{bind}}( \func{InCoins}, \func{OutCoins}, \left\{ S_u', C_u', T_u, (\Pi_{\text{par}})_u, \right\}_{u=0}^{w+w'-1}, \\
+        \Pi_{\text{base}}, \Pi_{\text{rp}}, \Pi_{\text{bal}}, \Pi_{\text{bal}'}, \Pi_{\text{type}} )
     \end{multline*}
     \item Generate a modified Chaum-Pedersen proof, where we additionally bind $\mu$ to the initial transcript:
     \begin{multline*}
-    \Pi_{\text{chaum}} = \func{ChaumProve}((pp_{\text{chaum}}, \mu), \{S_u', T_u\}_{u=0}^{w-1} \cup \{\underline{S}_u', \underline{T}_u\}_{u=0}^{\underline{w}-1}; \\
-    (\{s_u, r, -\hash_{\text{ser}'}(s_u, D)\}_{u=0}^{w-1} \cup \{\underline{s}_u, r, -\hash_{\text{ser}'}(\underline{s}_u, D)\}_{u=0}^{\underline{w}-1}))
+    \Pi_{\text{chaum}} = \func{ChaumProve}((pp_{\text{chaum}}, \mu), \{S_u', T_u\}_{u=0}^{w+w'-1} ; \\
+    (\{s_u, r, -\hash_{\text{ser}'}(s_u, D)\}_{u=0}^{w+w'-1}))
     \end{multline*}
     \item Output the tuple:
     \begin{multline*}
-    \text{tx}_{\text{spend}} = ( \func{BaseInCoins}, \func{GenericInCoins}, \func{BaseOutCoins}, \func{GenericOutCoins}, \\
-    f, \left\{ S_u', C_u', T_u, (\Pi_{\text{par}})_u \right\}_{u=0}^{w-1}, \left\{ \underline{S}_u', \underline{C}_u', \underline{T}_u, (\underline{\Pi}_{\text{par}})_u \right\}_{u=0}^{\underline{w}-1}, \\
-    \Pi_{\text{base}}, \Pi_{\text{rp}}, \Pi_{\text{bal}}, \underline{\Pi}_{\text{bal}}, \Pi_{\text{type}}, \Pi_{\text{chaum}} )
+    \text{tx}_{\text{spend}} = ( \func{InCoins}, \func{OutCoins}, f, \left\{ S_u', C_u', T_u, (\Pi_{\text{par}})_u \right\}_{u=0}^{w+w'-1}, \\
+    \Pi_{\text{base}}, \Pi_{\text{rp}}, \Pi_{\text{bal}}, \Pi_{\text{bal}'}, \Pi_{\text{type}}, \Pi_{\text{chaum}} )
     \end{multline*}
 \end{enumerate}
-
-Observe that this effectively maintains two ``pools" of coins available for cover sets.
-Coins minted with $a = 0$, or those generated in spends produced by consuming base-type coins, are the only coins used for producing $\func{BaseInCoins}$ cover sets.
-Coins minted with $a \neq 0$, or those generated in spends produced by consuming generic-type coins, are the only coins used for $\func{GenericInCoins}$ cover sets.
-
-Also note that it is possible to aggregate all output coin range proofs using a suitable range proving system; this is particularly relevant for designs like those of \cite{bp,bp_plus} that scale logarithmically in size for aggregation purposes.
 
 Transaction verification is modified in a straightforward manner to verify the relevant proofs.
 
@@ -452,12 +433,12 @@ We assume throughout that both group and scalar elements have $32$-byte represen
     \hline
     \textbf{Component} & \textbf{$\Delta\G$} & \textbf{$\Delta\F$} & \textbf{$\Delta$ bytes} \\
     \hline
-    $a$ & &  & $\tau\underline{t}$ \\
+    $a$ & &  & $\tau t'$ \\
     \hline
-    Total & & & $\tau\underline{t}$ \\
+    Total & & & $\tau t'$ \\
     \hline
     \end{tabular}
-    \caption{Mint transaction size change by component ($\underline{t}$ generated generic-type coins)}
+    \caption{Mint transaction size change by component ($t'$ generated generic-type coins)}
     \label{table:size_mint}
 \end{table}
 
@@ -469,20 +450,20 @@ We assume throughout that both group and scalar elements have $32$-byte represen
     \hline
     $\Pi_{\text{rp}}$ & & $1$ & \\
     $\Pi_{\text{bal}}$ & & $1$ & \\
-    $\underline{\Pi}_{\text{bal}}$ & $1$ & $2$ & \\
+    $\Pi_{\text{bal}'}$ & $1$ & $2$ & \\
     $\Pi_{\text{base}}$ & $2$ & $2$ & \\
-    $\{\overline{r}_j\}$ & & & $\tau\underline{t}$ \\
+    $\{\overline{r}_j\}$ & & & $\tau t'$ \\
     $\Pi_{\text{type}}$ & $2$ & $5$ & \\
     \hline
-    Total & $5$ & $11$ & $\tau \underline{t}$ \\
+    Total & $5$ & $11$ & $\tau t'$ \\
     \hline
     \end{tabular}
-    \caption{Spend transaction size change by component ($\underline{t}$ generated generic-type coins)}
+    \caption{Spend transaction size change by component ($t'$ generated generic-type coins)}
     \label{table:size_spend}
 \end{table}
 
-A mint transaction with $\underline{t}$ generated generic-type coins increases by $\tau\underline{t}$ bytes.
-A spend transaction with $\underline{t}$ generated generic-type coins increases by $512 + \tau t$ bytes.
+A mint transaction with $t'$ generated generic-type coins increases by $\tau t'$ bytes.
+A spend transaction with $t'$ generated generic-type coins increases by $512 + \tau t'$ bytes.
 
 
 \bibliographystyle{plain}
