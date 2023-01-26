@@ -1,6 +1,8 @@
-\documentclass{article}
-\usepackage[utf8]{inputenc}
-\usepackage{amsmath,amssymb,amsthm,amsfonts}
+\documentclass{llncs}
+
+\pagestyle{plain}
+
+\usepackage{amsmath,amssymb,amsfonts}
 \usepackage{mathtools}
 \usepackage{hyperref}
 \usepackage{authblk}
@@ -12,29 +14,26 @@
 \newcommand{\comm}{\func{Comm}}
 \newcommand{\hash}{\mathcal{H}}
 
-\title{Spats: user-defined confidential assets for the Spark transaction protocol}
-\author[1]{Aaron Feickert}
-\author[2,3]{Aram Jivanyan\thanks{Corresponding author: \texttt{aram@firo.org}}}
-\affil[1]{Cypher Stack}
-\affil[2]{Firo}
-\affil[3]{Yerevan State University}
-\date{\today}
-
 \begin{document}
 
+\title{Spats: user-defined confidential assets for the Spark transaction protocol}
+\author{Aaron Feickert\inst{1}\thanks{Corresponding author: \email{aaron@cypherstack.com}} \and Aram Jivanyan\inst{2,3}}
+\institute{Cypher Stack \and Firo \and Yerevan State University}
 \maketitle
 
+\begin{abstract}
 In privacy-preserving transaction protocols, confidential asset designs permit transfer of quantities of distinct asset types in a way that obscures their types and values.
 Spark is a protocol that provides flexible privacy properties relating to addressing, transaction sources and recipients, and value transfer; however, it does not natively support the use of multiple confidential asset types.
 Here we describe Spats, a new design for confidential assets compatible with Spark that focuses on efficient and modular implementation.
 It does so by extending coin value commitments to bind and mask an asset type, and asserting in zero knowledge that this type is maintained throughout transactions.
 We describe the cryptographic components and changes to the Spark protocol necessary for the design of Spats.
+\end{abstract}
 
 
 \section{Introduction}
 
 Privacy-preserving transaction protocols have seen a wealth of research.
-Protocols like RingCT \cite{ringct} in Monero, Sprout and Sapling \cite{zcash_sprout, zcash_sapling, zcash} in Zcash, Mimblewimble \cite{mw} in Grin and Beam, and Lelantus \cite{lelantus} in Firo each take different approaches toward privacy.
+Protocols like RingCT \cite{ringct} in Monero, Sprout and Sapling \cite{zcash_sprout,zcash_sapling,zcash} in Zcash, Mimblewimble \cite{mw} in Grin and Beam, and Lelantus \cite{lelantus} in Firo each take different approaches toward privacy.
 These protocols may provide useful functionality relating to transaction graph ambiguity or obfuscation, addressing, amount confidentiality, and scaling.
 
 Spark \cite{spark} is a recent protocol, based on techniques from Lelantus, that provides trustless and flexible confidential transactions.
@@ -77,7 +76,7 @@ For our purposes, we let $\func{Comm}$ be a Pedersen commitment, where $$\func{C
 
 \subsection{Parallel one-of-many proving system}
 
-The parallel one-of-many proving system definition used in Spark is modified to support extended commitments.
+The parallel one-of-many proving system definition used in Spark may be modified to support extended commitments.
 The public parameters are $pp_{\text{par}} = (n, m, pp_{\text{comm}})$, where $pp_{\text{com}}$ are the public parameters for an extended commitment construction.
 The algorithm tuple $(\func{ParallelProve}, \func{ParallelVerify})$ is modified to support the following relation:
 \begin{multline*}
@@ -357,9 +356,9 @@ It is assumed that the recipient has run the $\func{Recover}$ algorithm on all c
     \item A full view key $\addr_{\text{full}}$
     \item A spend key $\addr_{\text{sk}}$
     \item A set of $N$ input coins $\func{InCoins}$ as a cover set, each of which was generated in a previous valid transaction
-    \item A set of indexes in $\func{InCoins}$, serial numbers, tags, values, and nonces $\{l_u, s_u, T_u, v_u, k_u\}_{u=0}^{w+w'-1}$ such that the $[0, w)$-subset corresponds to base coins with $a = 0$ to spend and the $[w, w')$-subset corresponds to generic coins of a common type $a'$ to spend
+    \item A set of indexes in $\func{InCoins}$, serial numbers, tags, values, and nonces $$\{l_u, s_u, T_u, v_u, k_u\}_{u=0}^{w+w'-1}$$ such that the $[0, w)$-subset corresponds to base coins with $a = 0$ to spend and the $[w, w')$-subset corresponds to generic coins of a common type $a'$ to spend
     \item An integer fee value $f \in [0,v_{\text{max}})$
-    \item A set of output coin public addresses, values, and memos: $$\{\addr_{\text{pk},j}, v_j, m_j\}_{j=0}^{t+t'-1}$$ such that the $[0, t)$-subset corresponds to base coins with $a = 0$ to generate and the $[t, t')$-subset corresponds to coins of type $a'$ to generate
+    \item A set of output coin public addresses, values, and memos $$\{\addr_{\text{pk},j}, v_j, m_j\}_{j=0}^{t+t'-1}$$ such that the $[0, t)$-subset corresponds to base coins with $a = 0$ to generate and the $[t, t')$-subset corresponds to coins of type $a'$ to generate
 \end{itemize}
 
 \textbf{Outputs:} Spend transaction $\text{tx}_{\text{spend}}$
@@ -466,7 +465,7 @@ A mint transaction with $t'$ generated generic-type coins increases by $\tau t'$
 A spend transaction with $t'$ generated generic-type coins increases by $512 + \tau t'$ bytes.
 
 
-\bibliographystyle{plain}
+\bibliographystyle{splncs04}
 \bibliography{main}
 
 \end{document}
