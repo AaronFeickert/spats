@@ -68,14 +68,14 @@ Throughout this paper, let $\G$ be a prime-order group where the discrete logari
 
 \subsection{Extended commitments}
 
-The constructions used in Spats, require homomorphic commitments with multiple independent value components; for clarity, we refer to these as \textit{extended commitments}.
+The constructions used in Spats require homomorphic commitments with multiple independent value components; for clarity, we refer to these as \textit{extended commitments}.
 Such a commitment scheme is common, and is often used more generally to bind to and hide a vector of values with a single mask.
 The public parameters are $pp_{\text{com},n} = (\G, \F, \{G_i\}_{i=0}^{n-1}, H)$, where $n > 1$ and $\{G_i\}_{i=0}^{n-1} \cup \{H\} \subset \G$ is a set of independent public generators; that is, they have no efficiently-computable discrete logarithm relationship.
 The commitment scheme consists of a function $\com_n: \F^{n+1} \to \G$ that is additively homomorphic.
 For our purposes, we let $\com_n$ be a Pedersen-type commitment, where $$\com_n(\{v_i\}_{i=0}^{n-1}, m) = \sum_{i=0}^{n-1} v_i G_i + mH$$ for all values $\{v_i\}_{i=0}^{n-1} \subset \F$ and masks $m \in \F$.
 
 Because the generators are independent, such a commitment scheme is computationally binding.
-It is also perfectly hiding across all value components if masks are uniformly distributed.
+It is also perfectly hiding.
 
 
 \subsection{Parallel one-of-many proving system}
