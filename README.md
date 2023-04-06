@@ -1,6 +1,6 @@
 # Spats
 
-This is the LaTeX source of the technical paper for Spats, an extension to the [Spark](https://eprint.iacr.org/2021/1173) transaction protocol supporting confidential assets.
+This is the LaTeX source of the technical paper for Spats, an extension to the [Spark](https://eprint.iacr.org/2021/1173) transaction protocol supporting confidential assets and non-fungible tokens.
 
 ## Testing
 
