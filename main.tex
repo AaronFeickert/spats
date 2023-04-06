@@ -110,19 +110,19 @@ We note that the modification adds only $n-1$ additional scalar elements to the 
 
 \subsection{Base asset proof}
 
-We require a proving system to assert in zero knowledge that the prover knows discrete logarithm representations of a set of extended commitments with a zero component.
+We require a proving system to assert in zero knowledge that the prover knows discrete logarithm representations of a set of extended commitments with certain zero components.
 In the context of Spats, this is used to show that certain extended commitments represent a base asset type reducing to standard Pedersen commitments by setting certain discrete logarithms to zero, and is useful by allowing optimal aggregation of commitment range proofs for space efficiency.
 Let $pp_{\text{base}} = (pp_{\text{com},3})$ be the public parameters of such a proving system, where $pp_{\text{com}_3}$ are the public parameters for an extended commitment construction.
 
 The proving system is a tuple of algorithms $(\func{BaseProve}, \func{BaseVerify})$ for the following relation:
 $$\{ pp_{\text{base}}, \{C_i\}_{i=0}^{n-1} ; (\{y_i, z_i\}_{i=0}^{n-1}) : \forall i \in [0,n), C_i = \com_3(0, 0, y_i, z_i) \}$$
 
-The batch Schnorr proving system described in \cite{batch_schnorr} may be easily generalized for this purpose, since an extended commitment with a zero component is algebraically equivalent to a standard Pedersen commitment.
+The batch Schnorr proving system described in \cite{batch_schnorr} may be easily generalized for this purpose, since an extended commitment with such zero components is algebraically equivalent to a standard Pedersen commitment.
 
 
 \subsection{Type equality proof}
 
-We introduce a new proving system to prove in zero knowledge that a set of extended commitments share a common single discrete logarithm in one component.
+We introduce a new proving system to prove in zero knowledge that a set of extended commitments share common single discrete logarithms in certain components.
 In the context of Spats, this proving system will be used to assert in zero knowledge that coins consumed and generated in a transaction share a common asset type and identifier.
 Let $$pp_{\text{type}} = (pp_{\text{com},3})$$ be the public parameters of such a proving system, where $pp_{\text{com},3}$ are the public parameters for an extended commitment construction.
 
@@ -201,7 +201,7 @@ Since the challenges are uniformly distributed, the system has a unique solution
 We can form a similar linear system to obtain unique $\{z_i\}_{i=1}^{n-1}$.
 
 This implies that the terms $C_i - C_0 = \com_3(0, 0, y_i - y_0, z_i - z_0)$ satisfy the original linear system in Equation \ref{eqn:sound} for all $i \in [1,n)$.
-From our earlier extraction we have $C_0 = \com_3(w, x, y_0, z_0)$, so for $i \in [1,n)$ we have $C_i = \com(w, x, y_i, z_i)$ as required.
+From our earlier extraction we have $C_0 = \com_3(w, x, y_0, z_0)$, so for $i \in [1,n)$ we have $C_i = \com_3(w, x, y_i, z_i)$ as required.
 
 It remains to show that these solutions are unique; that is, that no $C_i$ has a different representation with coefficients $w',x',y_i',z_i'$ consistent with successful verification.
 If this were the case, then we must have the polynomial equation $\sum_{i=0}^{n-1} c^i(y_i - y_i') = 0$ in $c$; however, since $c$ is selected randomly by the verifier, all coefficients of the polynomial must (with overwhelming probability) be zero by the Schwartz-Zippel lemma.
@@ -422,7 +422,7 @@ Transaction verification is modified in a straightforward manner to verify the r
 
 We briefly outline the efficiency of Spats compared to the original Spark protocol.
 Table \ref{table:size_mint} shows the change in size of mint transaction components, and Table \ref{table:size_spend} shows the change in size of spend transaction components.
-We assume that asset type representations are restricted to $\tau_a$ bytes, and that identifier representations are restricted to $\tau_s$ bytes.
+We assume that asset type representations are restricted to $\tau_a$ bytes, and that identifier representations are restricted to $\tau_\iota$ bytes.
 
 \begin{table}[ht]
     \centering
