@@ -220,15 +220,15 @@ This completes the proof.
 \end{proof}
 
 
-\subsection{Balance proof}
+\subsection{Extended balance proof}
 
 We require a representation proof for use in balance assertion.
-It proves that a extended commitment is bound to a zero value.
+It proves that an extended commitment is bound to a zero value.
 In the context of Spats, this proving system will be used to assert that value is maintained between consumed and generated coins in a transaction.
 Let $$pp_{\text{bal}} = ( pp_{\text{com},3})$$ be the public parameters of such a proving system, where $pp_{\text{com},3}$ are the public parameters for an extended commitment construction.
 
 The proving system is a tuple of algorithms $(\func{BalanceProve}, \func{BalanceVerify})$ for the following relation:
-$$\{ pp_{\text{bal}}, C \in \G ; (x, z) \in \F : C = \com_3(w, x, 0, z) \}$$
+$$\{ pp_{\text{bal}}, C \in \G ; (w, x, z) \in \F : C = \com_3(w, x, 0, z) \}$$
 
 The protocol proceeds as follows:
 \begin{enumerate}
@@ -308,7 +308,7 @@ Note that while such implementation-specific auxiliary data may be necessary for
     \item Parse the output coin value commitments $\{\overline{C}_j\}_{j=0}^{t-1}$ from $\func{OutCoins}$, where each $\overline{C}_j$ contains nonce $k_j$.
     \item Generate a representation proof for value, asset type, and identifier assertion:
     \begin{multline*}
-        \Pi_{\text{val}} = \func{BalanceProve}\left( pp_{\text{bal}}, H, \right. \\
+        \Pi_{\text{val}} = \func{RepProve}\left( pp_{\text{bal}}, H, \right. \\
         \left. \{ \overline{C}_j - \com_3(a_j, \iota_j, v_j, 0) \}_{j=0}^{t-1}; \{\hash_{\text{val}}(k_j)\}_{j=0}^{t-1} \right)
     \end{multline*}
     \item Output the mint transaction $\func{tx}_{\text{mint}} = (\func{OutCoins}, \Pi_{\text{val}})$.
@@ -389,14 +389,14 @@ It is assumed that the recipient has run the $\func{Recover}$ algorithm on all c
         \Pi_{\text{type}} = \func{TypeProve}\left( pp_{\text{type}}, \{C'_u\}_{u=w}^{w+w'-1} \cup \{\overline{C}_j\}_{j=t}^{t+t'-1} ; \right. \\
         \left. \left( a, \iota, \{v_u, \hash_{\text{val}'}(s_u, D)\}_{u=w}^{w+w'-1} \cup \{v_j, \hash_{\text{val}}(\overline{k_j})\}_{j=t}^{t+t'-1} \right) \right)
     \end{multline*}
-    \item Generate representation proofs for balance assertion:
+    \item Generate proofs for balance assertion:
     \begin{multline*}
     \Pi_{\text{bal}} = \func{RepProve}\left( pp_{\text{rep}}, H, \sum_{u=0}^{w-1} C_u' - \sum_{j=0}^{t-1} \overline{C}_j - \com_3(0,0,f,0); \right. \\
     \left. \sum_{u=0}^{w-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=0}^{t-1} \hash_{\text{val}}(\overline{k}_j) \right)
     \end{multline*}
     \begin{multline*}
-    \Pi_{\text{bal}'} = \func{RepProve}\left( pp_{\text{rep}}, H, \sum_{u=w}^{w+w'-1} C_u' - \sum_{j=t}^{t+t'-1} \overline{C}_j ; \right. \\
-    \left. \sum_{u=w}^{w+w'-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=t}^{t+t'-1} \hash_{\text{val}}(\overline{k}_j) \right)
+    \Pi_{\text{bal}'} = \func{BalanceProve}\left( pp_{\text{rep}}, H, \sum_{u=w}^{w+w'-1} C_u' - \sum_{j=t}^{t+t'-1} \overline{C}_j ; \right. \\
+    \left. \left( (w' - t')a, (w' - t')\iota, \sum_{u=w}^{w+w'-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=t}^{t+t'-1} \hash_{\text{val}}(\overline{k}_j) \right) \right)
     \end{multline*}
     \item Define the following binding hash:
     \begin{multline*}
@@ -447,13 +447,12 @@ We assume that asset type representations are restricted to $\tau_a$ bytes, and 
     \textbf{Component} & \textbf{$\Delta\G$} & \textbf{$\Delta\F$} & \textbf{$\Delta$ bytes} \\
     \hline
     $\Pi_{\text{rp}}$ & & $2$ & \\
-    $\Pi_{\text{bal}}$ & & $2$ & \\
     $\Pi_{\text{bal}'}$ & $1$ & $3$ & \\
     $\Pi_{\text{base}}$ & $2$ & $2$ & \\
     $\{\overline{r}_j\}$ & & & $(\tau_a + \tau_\iota) t'$ \\
     $\Pi_{\text{type}}$ & $2$ & $6$ & \\
     \hline
-    Total & $5$ & $15$ & $(\tau_a + \tau_\iota) t'$ \\
+    Total & $5$ & $13$ & $(\tau_a + \tau_\iota) t'$ \\
     \hline
     \end{tabular}
     \caption{Spend transaction size change by component ($t'$ generated generic-type coins)}
@@ -461,7 +460,7 @@ We assume that asset type representations are restricted to $\tau_a$ bytes, and 
 \end{table}
 
 A mint transaction with $t'$ generated generic-type coins increases by $(\tau_a + \tau_\iota) t'$ bytes.
-A spend transaction with $t'$ generated generic-type coins increases by $640 + (\tau_a + \tau_\iota) t'$ bytes, if we assume a 32-byte representation for group and scalar elements.
+A spend transaction with $t'$ generated generic-type coins increases by $576 + (\tau_a + \tau_\iota) t'$ bytes, if we assume a 32-byte representation for group and scalar elements.
 
 
 \section{Ownership of non-fungible tokens}
