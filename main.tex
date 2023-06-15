@@ -308,7 +308,7 @@ Note that while such implementation-specific auxiliary data may be necessary for
     \item Parse the output coin value commitments $\{\overline{C}_j\}_{j=0}^{t-1}$ from $\func{OutCoins}$, where each $\overline{C}_j$ contains nonce $k_j$.
     \item Generate a representation proof for value, asset type, and identifier assertion:
     \begin{multline*}
-        \Pi_{\text{val}} = \func{RepProve}\left( pp_{\text{bal}}, H, \right. \\
+        \Pi_{\text{val}} = \func{RepProve}\left( pp_{\text{rep}}, H, \right. \\
         \left. \{ \overline{C}_j - \com_3(a_j, \iota_j, v_j, 0) \}_{j=0}^{t-1}; \{\hash_{\text{val}}(k_j)\}_{j=0}^{t-1} \right)
     \end{multline*}
     \item Output the mint transaction $\func{tx}_{\text{mint}} = (\func{OutCoins}, \Pi_{\text{val}})$.
@@ -395,7 +395,7 @@ It is assumed that the recipient has run the $\func{Recover}$ algorithm on all c
     \left. \sum_{u=0}^{w-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=0}^{t-1} \hash_{\text{val}}(\overline{k}_j) \right)
     \end{multline*}
     \begin{multline*}
-    \Pi_{\text{bal}'} = \func{BalanceProve}\left( pp_{\text{rep}}, H, \sum_{u=w}^{w+w'-1} C_u' - \sum_{j=t}^{t+t'-1} \overline{C}_j ; \right. \\
+    \Pi_{\text{bal}'} = \func{BalanceProve}\left( pp_{\text{bal}}, \sum_{u=w}^{w+w'-1} C_u' - \sum_{j=t}^{t+t'-1} \overline{C}_j ; \right. \\
     \left. \left( (w' - t')a, (w' - t')\iota, \sum_{u=w}^{w+w'-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=t}^{t+t'-1} \hash_{\text{val}}(\overline{k}_j) \right) \right)
     \end{multline*}
     \item Define the following binding hash:
