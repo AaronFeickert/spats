@@ -347,6 +347,8 @@ A spend transaction spends coins of two asset types separately: one is a generic
 This ensures that fees can be denominated consistently and publicly.
 It is required that all consumed and generated coins of type $a = a'$ share a common identifier $\iota = \iota'$ for some $\iota'$, and that all generated coins of type $a = 0$ have identifier $\iota = 0$.
 
+The transaction also includes a transparent fee $f$ and optional transparent output value $v$ that are included in the base asset balance.
+
 It is assumed that the recipient has run the $\func{Recover}$ algorithm on all coins that it wishes to consume in such a transaction.
 
 \textbf{Inputs:}
@@ -355,7 +357,7 @@ It is assumed that the recipient has run the $\func{Recover}$ algorithm on all c
     \item A spend key $\addr_{\text{sk}}$
     \item A set of $N$ input coins $\func{InCoins}$ as a cover set, each of which was generated in a previous valid transaction
     \item A set of indexes in $\func{InCoins}$, serial numbers, tags, values, and nonces $\{l_u, s_u, T_u, v_u, k_u\}_{u=0}^{w+w'-1}$ such that the $[0, w)$-subset corresponds to base coins with $a = 0$ to spend and the $[w, w')$-subset corresponds to generic coins of a common type $a'$ to spend
-    \item An integer fee value $f \in [0,v_{\text{max}})$
+    \item An integer fee value $f \in [0,v_{\text{max}})$ and optional transparent output value $v \in [0, v_{\text{max}})$
     \item A set of output coin public addresses, values, and memos: $$\{\addr_{\text{pk},j}, v_j, m_j\}_{j=0}^{t+t'-1}$$ such that the $[0, t)$-subset corresponds to base coins with $a = 0$ to generate and the $[t, t')$-subset corresponds to coins of type $a'$ to generate
 \end{itemize}
 
@@ -391,7 +393,7 @@ It is assumed that the recipient has run the $\func{Recover}$ algorithm on all c
     \end{multline*}
     \item Generate proofs for balance assertion:
     \begin{multline*}
-    \Pi_{\text{bal}} = \func{RepProve}\left( pp_{\text{rep}}, H, \sum_{u=0}^{w-1} C_u' - \sum_{j=0}^{t-1} \overline{C}_j - \com_3(0,0,f,0); \right. \\
+    \Pi_{\text{bal}} = \func{RepProve}\left( pp_{\text{rep}}, H, \sum_{u=0}^{w-1} C_u' - \sum_{j=0}^{t-1} \overline{C}_j - \com_3(0,0,f + v,0); \right. \\
     \left. \sum_{u=0}^{w-1} \hash_{\text{val}'}(s_u,D) - \sum_{j=0}^{t-1} \hash_{\text{val}}(\overline{k}_j) \right)
     \end{multline*}
     \begin{multline*}
@@ -401,7 +403,7 @@ It is assumed that the recipient has run the $\func{Recover}$ algorithm on all c
     \item Define the following binding hash:
     \begin{multline*}
         \mu = \hash_{\text{bind}}( \func{InCoins}, \func{OutCoins}, \left\{ S_u', C_u', T_u, (\Pi_{\text{par}})_u, \right\}_{u=0}^{w+w'-1}, \\
-        \Pi_{\text{base}}, \Pi_{\text{rp}}, \Pi_{\text{bal}}, \Pi_{\text{bal}'}, \Pi_{\text{type}} )
+        \Pi_{\text{base}}, \Pi_{\text{rp}}, \Pi_{\text{bal}}, \Pi_{\text{bal}'}, \Pi_{\text{type}}, f, v )
     \end{multline*}
     \item Generate a modified Chaum-Pedersen proof, where we additionally bind $\mu$ to the initial transcript:
     \begin{multline*}
@@ -410,7 +412,7 @@ It is assumed that the recipient has run the $\func{Recover}$ algorithm on all c
     \end{multline*}
     \item Output the tuple:
     \begin{multline*}
-    \text{tx}_{\text{spend}} = ( \func{InCoins}, \func{OutCoins}, f, \left\{ S_u', C_u', T_u, (\Pi_{\text{par}})_u \right\}_{u=0}^{w+w'-1}, \\
+    \text{tx}_{\text{spend}} = ( \func{InCoins}, \func{OutCoins}, f, v, \left\{ S_u', C_u', T_u, (\Pi_{\text{par}})_u \right\}_{u=0}^{w+w'-1}, \\
     \Pi_{\text{base}}, \Pi_{\text{rp}}, \Pi_{\text{bal}}, \Pi_{\text{bal}'}, \Pi_{\text{type}}, \Pi_{\text{chaum}} )
     \end{multline*}
 \end{enumerate}
